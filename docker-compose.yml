@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  # MongoDB Database
+  mongodb:
+    image: mongo:7.0
+    container_name: airpool-mongodb
+    restart: unless-stopped
+    ports:
+      - '27017:27017'
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: airpool_admin
+      MONGO_INITDB_ROOT_PASSWORD: airpool_secret_2024
+      MONGO_INITDB_DATABASE: airpool
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - airpool-network
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: airpool-redis
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    command: redis-server --requirepass airpool_redis_2024
+    volumes:
+      - redis_data:/data
+    networks:
+      - airpool-network
+
+  # RabbitMQ Message Queue
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: airpool-rabbitmq
+    restart: unless-stopped
+    ports:
+      - '5672:5672'
+      - '15672:15672'
+    environment:
+      RABBITMQ_DEFAULT_USER: airpool
+      RABBITMQ_DEFAULT_PASS: airpool_rabbit_2024
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - airpool-network
+
+  # MinIO Object Storage (S3-compatible)
+  minio:
+    image: minio/minio:latest
+    container_name: airpool-minio
+    restart: unless-stopped
+    ports:
+      - '9000:9000'
+      - '9001:9001'
+    environment:
+      MINIO_ROOT_USER: airpool_minio
+      MINIO_ROOT_PASSWORD: airpool_minio_2024
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - airpool-network
+
+volumes:
+  mongodb_data:
+  redis_data:
+  rabbitmq_data:
+  minio_data:
+
+networks:
+  airpool-network:
+    driver: bridge

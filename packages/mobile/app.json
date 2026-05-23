@@ -1,0 +1,60 @@
+{
+  "expo": {
+    "name": "AirPool",
+    "slug": "airpool",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./src/assets/images/icon.png",
+    "scheme": "airpool",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./src/assets/images/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0284C7"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.zuhakhalid.airpool",
+      "infoPlist": {
+        "NSBluetoothAlwaysUsageDescription": "AirPool uses Bluetooth to connect with nearby co-passengers during flights.",
+        "NSBluetoothPeripheralUsageDescription": "AirPool uses Bluetooth to discover nearby passengers.",
+        "NSLocationWhenInUseUsageDescription": "AirPool needs your location to show nearby pools and meeting points.",
+        "NSLocationAlwaysUsageDescription": "AirPool uses background location for live tracking after landing.",
+        "NSCameraUsageDescription": "AirPool needs camera access for selfie verification."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./src/assets/images/adaptive-icon.png",
+        "backgroundColor": "#0284C7"
+      },
+      "package": "com.zuhakhalid.airpool",
+      "permissions": [
+        "BLUETOOTH",
+        "BLUETOOTH_ADMIN",
+        "BLUETOOTH_SCAN",
+        "BLUETOOTH_CONNECT",
+        "BLUETOOTH_ADVERTISE",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "NEARBY_WIFI_DEVICES"
+      ]
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-camera",
+      "expo-location",
+      "expo-notifications"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "your-eas-project-id"
+      }
+    }
+  }
+}

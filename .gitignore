@@ -1,0 +1,57 @@
+# Dependencies
+node_modules/
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.pnp.*
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Build outputs
+dist/
+build/
+.expo/
+web-build/
+
+# Native builds
+packages/mobile/ios/
+packages/mobile/android/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Testing
+coverage/
+
+# Docker volumes
+infra/docker/data/
+
+# MinIO data
+minio-data/
+
+# MongoDB data
+mongo-data/
+
+# Redis data
+redis-data/
+
+# Temporary files
+tmp/
+temp/

@@ -1,0 +1,28 @@
+{
+  "name": "airpool",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AirPool - Airport Ride Pooling App. Connect with co-passengers to share rides from airports to nearby destinations.",
+  "author": "Zuha Khalid",
+  "license": "MIT",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "mobile": "yarn workspace @airpool/mobile",
+    "backend": "yarn workspace @airpool/backend",
+    "admin": "yarn workspace @airpool/admin",
+    "dev:backend": "yarn workspace @airpool/backend dev",
+    "dev:mobile": "yarn workspace @airpool/mobile start",
+    "dev:admin": "yarn workspace @airpool/admin dev",
+    "start:backend": "yarn workspace @airpool/backend start",
+    "start:admin": "yarn workspace @airpool/admin start",
+    "lint": "yarn workspaces run lint",
+    "test": "yarn workspaces run test",
+    "docker:up": "docker-compose -f infra/docker-compose.yml up -d",
+    "docker:down": "docker-compose -f infra/docker-compose.yml down"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
