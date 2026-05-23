@@ -36,6 +36,11 @@ const schemas = {
     countryCode: Joi.string().default('+91'),
   }),
 
+  adminLogin: Joi.object({
+    email: Joi.string().email().required(),
+    password: Joi.string().required(),
+  }),
+
   updateProfile: Joi.object({
     name: Joi.string().min(2).max(100),
     email: Joi.string().email(),

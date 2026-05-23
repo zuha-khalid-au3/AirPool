@@ -221,6 +221,50 @@ const logout = async (req, res, next) => {
   }
 };
 
+// Admin login (React admin dashboard)
+const adminLogin = async (req, res, next) => {
+  try {
+    const { email, password } = req.body;
+    const adminEmail = (process.env.ADMIN_EMAIL || 'admin@airpool.app').toLowerCase();
+    const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
+
+    if (email.toLowerCase() !== adminEmail || password !== adminPassword) {
+      throw new AppError('Invalid email or password', 401, 'INVALID_CREDENTIALS');
+    }
+
+    const user = await User.findOne({
+      email: adminEmail,
+      role: { $in: ['admin', 'moderator'] },
+    });
+
+    if (!user) {
+      throw new AppError(
+        'Admin account not found. Run "make seed" to create the default admin user.',
+        404,
+        'ADMIN_NOT_FOUND'
+      );
+    }
+
+    const token = generateAccessToken({ userId: user._id, role: user.role });
+
+    res.status(200).json({
+      success: true,
+      message: 'Login successful',
+      data: {
+        token,
+        user: {
+          id: user._id,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+        },
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // Get current user
 const getCurrentUser = async (req, res, next) => {
   try {
@@ -239,5 +283,6 @@ module.exports = {
   googleAuth,
   refreshToken,
   logout,
+  adminLogin,
   getCurrentUser,
 };

@@ -1,9 +1,6 @@
 import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
-
-const API_BASE_URL = __DEV__
-  ? 'http://localhost:5000/api/v1'
-  : 'https://api.airpool.app/api/v1';
+import { API_BASE_URL } from '../config/env';
 
 const api = axios.create({
   baseURL: API_BASE_URL,

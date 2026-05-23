@@ -83,9 +83,13 @@ const startServer = async () => {
     await connectRabbitMQ();
     logger.info('RabbitMQ connected successfully');
 
-    // Setup AdminJS Panel
-    await setupAdminPanel(app);
-    logger.info('Admin panel initialized at /admin');
+    // Setup AdminJS Panel (optional — React admin dashboard uses JWT API)
+    try {
+      await setupAdminPanel(app);
+      logger.info('Admin panel initialized at /admin');
+    } catch (error) {
+      logger.warn({ err: error }, 'AdminJS panel failed to initialize; API will continue without /admin');
+    }
 
     // Setup Socket.io handlers
     setupSocketHandlers(io, getRedisClient());

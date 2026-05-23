@@ -51,6 +51,9 @@
       "expo-location",
       "expo-notifications"
     ],
+    "experiments": {
+      "autolinkingModuleResolution": true
+    },
     "extra": {
       "eas": {
         "projectId": "your-eas-project-id"

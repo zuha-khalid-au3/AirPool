@@ -1,9 +1,5 @@
-const AdminJS = require('adminjs');
-const AdminJSExpress = require('@adminjs/express');
-const AdminJSMongoose = require('@adminjs/mongoose');
 const session = require('express-session');
 const MongoStore = require('connect-mongo');
-const bcrypt = require('bcryptjs');
 
 const User = require('../models/User');
 const FlightTicket = require('../models/FlightTicket');
@@ -12,9 +8,12 @@ const Message = require('../models/Message');
 const AppConfig = require('../models/AppConfig');
 const SuspiciousActivity = require('../models/SuspiciousActivity');
 
-AdminJS.registerAdapter(AdminJSMongoose);
-
 const setupAdminPanel = async (app) => {
+  const { default: AdminJS } = await import('adminjs');
+  const { default: AdminJSExpress } = await import('@adminjs/express');
+  const { default: AdminJSMongoose } = await import('@adminjs/mongoose');
+
+  AdminJS.registerAdapter(AdminJSMongoose);
   const adminJs = new AdminJS({
     resources: [
       {
@@ -124,7 +123,7 @@ const setupAdminPanel = async (app) => {
     {
       authenticate: async (email, password) => {
         const adminEmail = process.env.ADMIN_EMAIL || 'admin@airpool.app';
-        const adminPassword = process.env.ADMIN_PASSWORD || 'changeme123';
+        const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
 
         if (email === adminEmail && password === adminPassword) {
           return { email: adminEmail, role: 'admin' };

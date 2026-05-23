@@ -1,9 +1,6 @@
 import { io } from 'socket.io-client';
 import * as SecureStore from 'expo-secure-store';
-
-const SOCKET_URL = __DEV__
-  ? 'http://localhost:5000'
-  : 'https://api.airpool.app';
+import { SOCKET_URL } from '../config/env';
 
 class SocketService {
   constructor() {
