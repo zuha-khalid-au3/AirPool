@@ -41,6 +41,10 @@ const schemas = {
     password: Joi.string().required(),
   }),
 
+  guestLogin: Joi.object({
+    guestId: Joi.string().optional(),
+  }),
+
   updateProfile: Joi.object({
     name: Joi.string().min(2).max(100),
     email: Joi.string().email(),

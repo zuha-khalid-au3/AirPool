@@ -1,10 +1,28 @@
-import React from 'react';
-import { View, Text, TouchableOpacity, Image, Dimensions } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-
-const { width } = Dimensions.get('window');
+import { useAuthStore } from '../../store/authStore';
 
 export default function WelcomeScreen({ navigation }) {
+  const guestLogin = useAuthStore((state) => state.guestLogin);
+  const [isGuestLoading, setIsGuestLoading] = useState(false);
+
+  const handleGuestLogin = async () => {
+    setIsGuestLoading(true);
+    try {
+      await guestLogin();
+    } catch (error) {
+      const message =
+        error.response?.data?.error?.message ||
+        (error.message === 'Network Error'
+          ? 'Cannot reach the server. Make sure the backend is running and your phone is on the same Wi-Fi network.'
+          : error.message || 'Unable to continue as guest. Please try again.');
+      Alert.alert('Guest login failed', message);
+    } finally {
+      setIsGuestLoading(false);
+    }
+  };
+
   return (
     <SafeAreaView className="flex-1 bg-white">
       <View className="flex-1 justify-center items-center px-6">
@@ -49,11 +67,24 @@ export default function WelcomeScreen({ navigation }) {
           </TouchableOpacity>
 
           <TouchableOpacity
-            className="border-2 border-secondary-200 w-full py-4 rounded-xl items-center"
+            className="border-2 border-secondary-200 w-full py-4 rounded-xl items-center mb-4"
             onPress={() => navigation.navigate('PhoneInput')}
             activeOpacity={0.8}
           >
             <Text className="text-secondary-700 text-lg font-semibold">I have an account</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            className="w-full py-4 rounded-xl items-center"
+            onPress={handleGuestLogin}
+            disabled={isGuestLoading}
+            activeOpacity={0.8}
+          >
+            {isGuestLoading ? (
+              <ActivityIndicator color="#0284C7" />
+            ) : (
+              <Text className="text-primary text-base font-semibold">Continue as Guest</Text>
+            )}
           </TouchableOpacity>
         </View>
       </View>

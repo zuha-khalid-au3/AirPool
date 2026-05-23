@@ -5,6 +5,7 @@ import api from '../services/api';
 export const useAuthStore = create((set, get) => ({
   user: null,
   isAuthenticated: false,
+  isGuest: false,
   isLoading: true,
   tokens: null,
 
@@ -17,10 +18,12 @@ export const useAuthStore = create((set, get) => ({
         api.defaults.headers.common['Authorization'] = `Bearer ${tokens.accessToken}`;
 
         const response = await api.get('/auth/me');
+        const user = response.data.data.user;
         set({
-          user: response.data.data.user,
+          user,
           tokens,
           isAuthenticated: true,
+          isGuest: user.isGuest || false,
           isLoading: false,
         });
       } else {
@@ -30,9 +33,24 @@ export const useAuthStore = create((set, get) => ({
       // Token might be expired, try refresh
       try {
         await get().refreshToken();
+        const response = await api.get('/auth/me');
+        const user = response.data.data.user;
+        set({
+          user,
+          isAuthenticated: true,
+          isGuest: user.isGuest || false,
+          isLoading: false,
+        });
       } catch (refreshError) {
         await SecureStore.deleteItemAsync('auth_tokens');
-        set({ isAuthenticated: false, isLoading: false, user: null, tokens: null });
+        await SecureStore.deleteItemAsync('guest_user_id');
+        set({
+          isAuthenticated: false,
+          isGuest: false,
+          isLoading: false,
+          user: null,
+          tokens: null,
+        });
       }
     }
   },
@@ -50,10 +68,27 @@ export const useAuthStore = create((set, get) => ({
 
     // Store tokens securely
     await SecureStore.setItemAsync('auth_tokens', JSON.stringify(tokens));
+    await SecureStore.deleteItemAsync('guest_user_id');
     api.defaults.headers.common['Authorization'] = `Bearer ${tokens.accessToken}`;
 
-    set({ user, tokens, isAuthenticated: true });
+    set({ user, tokens, isAuthenticated: true, isGuest: false });
     return { user, isNewUser };
+  },
+
+  // Guest login — full app access with anonymous account
+  guestLogin: async () => {
+    const storedGuestId = await SecureStore.getItemAsync('guest_user_id');
+    const response = await api.post('/auth/guest-login', storedGuestId ? { guestId: storedGuestId } : {});
+    const { user, tokens } = response.data.data;
+
+    await SecureStore.setItemAsync('auth_tokens', JSON.stringify(tokens));
+    if (user.isGuest) {
+      await SecureStore.setItemAsync('guest_user_id', user.id);
+    }
+    api.defaults.headers.common['Authorization'] = `Bearer ${tokens.accessToken}`;
+
+    set({ user, tokens, isAuthenticated: true, isGuest: true });
+    return user;
   },
 
   // Google Auth
@@ -62,9 +97,10 @@ export const useAuthStore = create((set, get) => ({
     const { user, tokens } = response.data.data;
 
     await SecureStore.setItemAsync('auth_tokens', JSON.stringify(tokens));
+    await SecureStore.deleteItemAsync('guest_user_id');
     api.defaults.headers.common['Authorization'] = `Bearer ${tokens.accessToken}`;
 
-    set({ user, tokens, isAuthenticated: true });
+    set({ user, tokens, isAuthenticated: true, isGuest: false });
     return user;
   },
 
@@ -96,7 +132,8 @@ export const useAuthStore = create((set, get) => ({
       // Ignore logout API errors
     }
     await SecureStore.deleteItemAsync('auth_tokens');
+    await SecureStore.deleteItemAsync('guest_user_id');
     delete api.defaults.headers.common['Authorization'];
-    set({ user: null, tokens: null, isAuthenticated: false });
+    set({ user: null, tokens: null, isAuthenticated: false, isGuest: false });
   },
 }));

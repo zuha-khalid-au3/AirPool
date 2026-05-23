@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuthStore } from '../../store/authStore';
 
 export default function ProfileScreen({ navigation }) {
-  const { user, logout } = useAuthStore();
+  const { user, logout, isGuest } = useAuthStore();
 
   const handleLogout = () => {
     Alert.alert('Logout', 'Are you sure you want to logout?', [
@@ -27,19 +27,23 @@ export default function ProfileScreen({ navigation }) {
               </Text>
             </View>
             <Text className="text-secondary-900 text-xl font-bold">{user?.name || 'User'}</Text>
-            <Text className="text-secondary-500 mt-1">+91 {user?.phone}</Text>
+            {isGuest ? (
+              <Text className="text-secondary-500 mt-1">Guest Account</Text>
+            ) : (
+              <Text className="text-secondary-500 mt-1">+91 {user?.phone}</Text>
+            )}
             {user?.email && (
               <Text className="text-secondary-400 text-sm mt-1">{user.email}</Text>
             )}
 
             {/* Verification Badge */}
             <View className={`mt-3 px-4 py-2 rounded-full ${
-              user?.isVerified ? 'bg-success/10' : 'bg-warning/10'
+              isGuest ? 'bg-secondary-100' : user?.isVerified ? 'bg-success/10' : 'bg-warning/10'
             }`}>
               <Text className={`font-medium text-sm ${
-                user?.isVerified ? 'text-success' : 'text-warning'
+                isGuest ? 'text-secondary-600' : user?.isVerified ? 'text-success' : 'text-warning'
               }`}>
-                {user?.isVerified ? '✓ Verified Account' : '⚠ Unverified'}
+                {isGuest ? '👤 Guest Mode' : user?.isVerified ? '✓ Verified Account' : '⚠ Unverified'}
               </Text>
             </View>
           </View>

@@ -99,6 +99,10 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    isGuest: {
+      type: Boolean,
+      default: false,
+    },
     banReason: String,
     banExpiresAt: Date,
     refreshToken: String,

@@ -24,6 +24,7 @@ const poolRoutes = require('./routes/pool.routes');
 const chatRoutes = require('./routes/chat.routes');
 const ticketRoutes = require('./routes/ticket.routes');
 const configRoutes = require('./routes/config.routes');
+const adminRoutes = require('./routes/admin.routes');
 
 const app = express();
 const server = http.createServer(app);
@@ -61,6 +62,7 @@ app.use('/api/v1/pools', poolRoutes);
 app.use('/api/v1/chat', chatRoutes);
 app.use('/api/v1/tickets', ticketRoutes);
 app.use('/api/v1/config', configRoutes);
+app.use('/api/v1/admin', adminRoutes);
 
 // Error Handler (must be last)
 app.use(errorHandler);

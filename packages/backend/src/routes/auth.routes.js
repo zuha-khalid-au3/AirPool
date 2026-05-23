@@ -19,6 +19,14 @@ router.post(
 // Google OAuth
 router.post('/google', authRateLimiter, authController.googleAuth);
 
+// Guest login
+router.post(
+  '/guest-login',
+  authRateLimiter,
+  validate(schemas.guestLogin),
+  authController.guestLogin
+);
+
 // Admin login
 router.post(
   '/admin/login',

@@ -4,6 +4,34 @@ const { generateOTP } = require('../utils/encryption');
 const { getRedisClient } = require('../config/redis');
 const { AppError } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
+const { v4: uuidv4 } = require('uuid');
+
+const formatAuthUser = (user) => ({
+  id: user._id,
+  phone: user.phone,
+  name: user.name,
+  email: user.email,
+  avatar: user.avatar,
+  isVerified: user.isVerified,
+  kycStatus: user.kycStatus,
+  trustScore: user.trustScore,
+  role: user.role,
+  isGuest: user.isGuest || false,
+});
+
+const issueUserTokens = async (user) => {
+  const accessToken = generateAccessToken({ userId: user._id, role: user.role });
+  const refreshToken = generateRefreshToken({ userId: user._id });
+
+  user.refreshToken = refreshToken;
+  user.lastActive = new Date();
+  await user.save({ validateBeforeSave: false });
+
+  return {
+    user: formatAuthUser(user),
+    tokens: { accessToken, refreshToken },
+  };
+};
 
 // Send OTP
 const sendOTP = async (req, res, next) => {
@@ -69,34 +97,13 @@ const verifyOTP = async (req, res, next) => {
       isNewUser = true;
     }
 
-    // Generate tokens
-    const accessToken = generateAccessToken({ userId: user._id, role: user.role });
-    const refreshToken = generateRefreshToken({ userId: user._id });
-
-    // Store refresh token
-    user.refreshToken = refreshToken;
-    user.lastActive = new Date();
-    await user.save({ validateBeforeSave: false });
+    const authData = await issueUserTokens(user);
 
     res.status(200).json({
       success: true,
       message: isNewUser ? 'Account created successfully' : 'Login successful',
       data: {
-        user: {
-          id: user._id,
-          phone: user.phone,
-          name: user.name,
-          email: user.email,
-          avatar: user.avatar,
-          isVerified: user.isVerified,
-          kycStatus: user.kycStatus,
-          trustScore: user.trustScore,
-          role: user.role,
-        },
-        tokens: {
-          accessToken,
-          refreshToken,
-        },
+        ...authData,
         isNewUser,
       },
     });
@@ -138,29 +145,12 @@ const googleAuth = async (req, res, next) => {
       });
     }
 
-    const accessToken = generateAccessToken({ userId: user._id, role: user.role });
-    const refreshToken = generateRefreshToken({ userId: user._id });
-
-    user.refreshToken = refreshToken;
-    user.lastActive = new Date();
-    await user.save({ validateBeforeSave: false });
+    const authData = await issueUserTokens(user);
 
     res.status(200).json({
       success: true,
       message: 'Google authentication successful',
-      data: {
-        user: {
-          id: user._id,
-          phone: user.phone,
-          name: user.name,
-          email: user.email,
-          avatar: user.avatar,
-          isVerified: user.isVerified,
-          kycStatus: user.kycStatus,
-          trustScore: user.trustScore,
-        },
-        tokens: { accessToken, refreshToken },
-      },
+      data: authData,
     });
   } catch (error) {
     next(error);
@@ -215,6 +205,39 @@ const logout = async (req, res, next) => {
     res.status(200).json({
       success: true,
       message: 'Logged out successfully',
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Guest login — creates a real user with JWT so all app features work
+const guestLogin = async (req, res, next) => {
+  try {
+    const { guestId } = req.body;
+
+    let user = null;
+    if (guestId) {
+      user = await User.findOne({ _id: guestId, isGuest: true });
+    }
+
+    if (!user) {
+      const guestUuid = uuidv4().replace(/-/g, '').slice(0, 12);
+      user = await User.create({
+        phone: `guest_${guestUuid}`,
+        countryCode: '+00',
+        name: `Guest ${guestUuid.slice(0, 4).toUpperCase()}`,
+        isGuest: true,
+      });
+      logger.info(`Guest user created: ${user._id}`);
+    }
+
+    const authData = await issueUserTokens(user);
+
+    res.status(200).json({
+      success: true,
+      message: 'Guest login successful',
+      data: authData,
     });
   } catch (error) {
     next(error);
@@ -283,6 +306,7 @@ module.exports = {
   googleAuth,
   refreshToken,
   logout,
+  guestLogin,
   adminLogin,
   getCurrentUser,
 };

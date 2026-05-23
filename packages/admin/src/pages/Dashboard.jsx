@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import axios from 'axios';
+import api from '../api';
 
 export default function Dashboard() {
   const [stats, setStats] = useState({
@@ -8,30 +8,41 @@ export default function Dashboard() {
     completedRides: 0,
     pendingKYC: 0,
   });
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState('');
 
   useEffect(() => {
-    // In production, fetch from API
-    setStats({
-      totalUsers: 0,
-      activePools: 0,
-      completedRides: 0,
-      pendingKYC: 0,
-    });
+    const fetchStats = async () => {
+      try {
+        const response = await api.get('/admin/stats');
+        setStats(response.data.data);
+      } catch (err) {
+        setError('Failed to load dashboard stats');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchStats();
   }, []);
 
   return (
     <div>
       <h1 className="text-2xl font-bold text-slate-900 mb-8">Dashboard</h1>
 
-      {/* Stats Grid */}
+      {error && (
+        <p className="mb-6 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
+          {error}
+        </p>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        <StatCard title="Total Users" value={stats.totalUsers} icon="👥" color="blue" />
-        <StatCard title="Active Pools" value={stats.activePools} icon="🚗" color="green" />
-        <StatCard title="Completed Rides" value={stats.completedRides} icon="✅" color="purple" />
-        <StatCard title="Pending KYC" value={stats.pendingKYC} icon="⏳" color="orange" />
+        <StatCard title="Total Users" value={isLoading ? '…' : stats.totalUsers} icon="👥" color="blue" />
+        <StatCard title="Active Pools" value={isLoading ? '…' : stats.activePools} icon="🚗" color="green" />
+        <StatCard title="Completed Rides" value={isLoading ? '…' : stats.completedRides} icon="✅" color="purple" />
+        <StatCard title="Pending KYC" value={isLoading ? '…' : stats.pendingKYC} icon="⏳" color="orange" />
       </div>
 
-      {/* Quick Actions */}
       <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200 mb-8">
         <h2 className="text-lg font-semibold text-slate-900 mb-4">Quick Actions</h2>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -42,7 +53,6 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Info */}
       <div className="bg-primary-50 rounded-xl p-6 border border-primary-200">
         <h3 className="text-primary-800 font-semibold mb-2">Admin Panel Features</h3>
         <ul className="text-primary-700 text-sm space-y-2">
