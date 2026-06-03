@@ -1,14 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, Alert, ActivityIndicator } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePoolStore } from '../../store/poolStore';
 import { useAuthStore } from '../../store/authStore';
+import { getUserId, idsMatch } from '../../utils/user';
 
 export default function PoolDetailsScreen({ navigation, route }) {
   const { poolId } = route.params;
   const { currentPool, getPoolDetails, joinPool, leavePool, updatePoolStatus, isLoading } = usePoolStore();
   const { user } = useAuthStore();
   const [actionLoading, setActionLoading] = useState(false);
+  const insets = useSafeAreaInsets();
+  const userId = getUserId(user);
 
   useEffect(() => {
     getPoolDetails(poolId);
@@ -23,8 +26,8 @@ export default function PoolDetailsScreen({ navigation, route }) {
   }
 
   const activeMembers = currentPool.members?.filter((m) => m.status === 'active') || [];
-  const isMember = activeMembers.some((m) => m.user?._id === user?.id || m.user === user?.id);
-  const isCreator = currentPool.creator?._id === user?.id || currentPool.creator === user?.id;
+  const isMember = activeMembers.some((m) => idsMatch(getUserId(m.user), userId));
+  const isCreator = idsMatch(currentPool.creator, userId);
   const spotsLeft = currentPool.maxMembers - activeMembers.length;
 
   const handleJoin = async () => {
@@ -96,7 +99,7 @@ export default function PoolDetailsScreen({ navigation, route }) {
 
   return (
     <SafeAreaView className="flex-1 bg-secondary-50">
-      <ScrollView className="flex-1">
+      <ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: insets.bottom + 96 }}>
         {/* Header */}
         <View className="bg-primary px-6 pt-4 pb-8">
           <View className="flex-row items-center mb-4">
@@ -181,7 +184,7 @@ export default function PoolDetailsScreen({ navigation, route }) {
                   Trust Score: {member.user?.trustScore || 50}
                 </Text>
               </View>
-              {(member.user?._id === currentPool.creator?._id || member.user === currentPool.creator) && (
+              {(idsMatch(member.user, currentPool.creator)) && (
                 <View className="bg-primary-50 px-2 py-1 rounded">
                   <Text className="text-primary text-xs font-medium">Creator</Text>
                 </View>

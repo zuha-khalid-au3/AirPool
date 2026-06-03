@@ -8,10 +8,12 @@ import { useChatStore } from '../../store/chatStore';
 import { useAuthStore } from '../../store/authStore';
 import { socketService } from '../../services/socket.service';
 import { format } from 'date-fns';
+import { getUserId, idsMatch } from '../../utils/user';
 
 export default function GroupChatScreen({ navigation, route }) {
   const { chatRoomId, poolId } = route.params;
   const { user } = useAuthStore();
+  const userId = getUserId(user);
   const {
     messages, loadMessages, sendMessage, receiveMessage,
     confirmMessageSent, typingUsers, setTypingUser, removeTypingUser,
@@ -32,7 +34,7 @@ export default function GroupChatScreen({ navigation, route }) {
 
       // Listen for events
       socketService.on('new_message', (data) => {
-        if (data.message.sender._id !== user?.id) {
+        if (!idsMatch(data.message.sender, userId)) {
           receiveMessage(data.message);
         }
       });
@@ -95,7 +97,7 @@ export default function GroupChatScreen({ navigation, route }) {
   };
 
   const renderMessage = ({ item: message }) => {
-    const isOwnMessage = message.sender?._id === user?.id || message.sender === user?.id;
+    const isOwnMessage = idsMatch(message.sender, userId);
     const isSystem = message.messageType === 'system';
 
     if (isSystem) {

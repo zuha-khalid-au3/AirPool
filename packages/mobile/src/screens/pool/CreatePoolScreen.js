@@ -4,9 +4,18 @@ import {
   Alert, ActivityIndicator, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import DateTimePicker from '@react-native-community/datetimepicker';
+import { format } from 'date-fns';
 import { usePoolStore } from '../../store/poolStore';
 import { useConfigStore } from '../../store/configStore';
 import { useAuthStore } from '../../store/authStore';
+
+const getDefaultArrivalDateTime = () => {
+  const date = new Date();
+  date.setDate(date.getDate() + 1);
+  date.setHours(14, 0, 0, 0);
+  return date;
+};
 
 export default function CreatePoolScreen({ navigation }) {
   const { createPool, isLoading } = usePoolStore();
@@ -21,8 +30,43 @@ export default function CreatePoolScreen({ navigation }) {
   const [maxMembers, setMaxMembers] = useState(4);
   const [genderPreference, setGenderPreference] = useState('any');
   const [estimatedCost, setEstimatedCost] = useState('');
-  const [arrivalDate, setArrivalDate] = useState('');
-  const [arrivalTime, setArrivalTime] = useState('');
+  const [arrivalDateTime, setArrivalDateTime] = useState(getDefaultArrivalDateTime);
+  const [showDatePicker, setShowDatePicker] = useState(Platform.OS === 'ios');
+  const [showTimePicker, setShowTimePicker] = useState(false);
+
+  const handleDateChange = (event, selectedDate) => {
+    if (Platform.OS === 'android') {
+      setShowDatePicker(false);
+      if (event.type === 'dismissed') return;
+    }
+
+    if (selectedDate) {
+      setArrivalDateTime((current) => {
+        const updated = new Date(current);
+        updated.setFullYear(
+          selectedDate.getFullYear(),
+          selectedDate.getMonth(),
+          selectedDate.getDate()
+        );
+        return updated;
+      });
+    }
+  };
+
+  const handleTimeChange = (event, selectedTime) => {
+    if (Platform.OS === 'android') {
+      setShowTimePicker(false);
+      if (event.type === 'dismissed') return;
+    }
+
+    if (selectedTime) {
+      setArrivalDateTime((current) => {
+        const updated = new Date(current);
+        updated.setHours(selectedTime.getHours(), selectedTime.getMinutes(), 0, 0);
+        return updated;
+      });
+    }
+  };
 
   const handleCreate = async () => {
     if (!flightNumber.trim()) {
@@ -37,8 +81,8 @@ export default function CreatePoolScreen({ navigation }) {
       Alert.alert('Required', 'Please enter your destination');
       return;
     }
-    if (!arrivalDate || !arrivalTime) {
-      Alert.alert('Required', 'Please enter arrival date and time');
+    if (arrivalDateTime <= new Date()) {
+      Alert.alert('Invalid time', 'Arrival date and time must be in the future');
       return;
     }
 
@@ -50,7 +94,7 @@ export default function CreatePoolScreen({ navigation }) {
           name: selectedAirport.name,
           city: selectedAirport.city,
         },
-        arrivalTime: new Date(`${arrivalDate}T${arrivalTime}:00`).toISOString(),
+        arrivalTime: arrivalDateTime.toISOString(),
         destination: {
           name: destination,
           address: destinationAddress || destination,
@@ -127,27 +171,72 @@ export default function CreatePoolScreen({ navigation }) {
           </View>
 
           {/* Arrival Date & Time */}
-          <View className="flex-row mb-5">
-            <View className="flex-1 mr-3">
-              <Text className="text-secondary-700 font-medium mb-2">Arrival Date *</Text>
-              <TextInput
-                className="border-2 border-secondary-200 rounded-xl px-4 py-3 text-base text-secondary-900"
-                placeholder="YYYY-MM-DD"
-                placeholderTextColor="#94A3B8"
-                value={arrivalDate}
-                onChangeText={setArrivalDate}
-              />
+          <View className="mb-5">
+            <Text className="text-secondary-700 font-medium mb-2">Arrival Date & Time *</Text>
+
+            <View className="flex-row mb-3">
+              <TouchableOpacity
+                className={`flex-1 mr-3 border-2 rounded-xl px-4 py-3 ${
+                  showDatePicker ? 'border-primary bg-primary-50' : 'border-secondary-200 bg-white'
+                }`}
+                onPress={() => {
+                  setShowDatePicker(true);
+                  setShowTimePicker(false);
+                }}
+                activeOpacity={0.7}
+              >
+                <Text className="text-secondary-400 text-xs mb-1">Date</Text>
+                <Text className="text-secondary-900 text-base font-medium">
+                  {format(arrivalDateTime, 'EEE, dd MMM yyyy')}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                className={`flex-1 border-2 rounded-xl px-4 py-3 ${
+                  showTimePicker ? 'border-primary bg-primary-50' : 'border-secondary-200 bg-white'
+                }`}
+                onPress={() => {
+                  setShowTimePicker(true);
+                  setShowDatePicker(Platform.OS === 'ios');
+                }}
+                activeOpacity={0.7}
+              >
+                <Text className="text-secondary-400 text-xs mb-1">Time</Text>
+                <Text className="text-secondary-900 text-base font-medium">
+                  {format(arrivalDateTime, 'hh:mm a')}
+                </Text>
+              </TouchableOpacity>
             </View>
-            <View className="flex-1">
-              <Text className="text-secondary-700 font-medium mb-2">Time *</Text>
-              <TextInput
-                className="border-2 border-secondary-200 rounded-xl px-4 py-3 text-base text-secondary-900"
-                placeholder="HH:MM"
-                placeholderTextColor="#94A3B8"
-                value={arrivalTime}
-                onChangeText={setArrivalTime}
-              />
-            </View>
+
+            {showDatePicker && (
+              <View className="border-2 border-secondary-100 rounded-xl overflow-hidden mb-3 bg-white">
+                <DateTimePicker
+                  value={arrivalDateTime}
+                  mode="date"
+                  display={Platform.OS === 'ios' ? 'inline' : 'calendar'}
+                  minimumDate={new Date()}
+                  onChange={handleDateChange}
+                  themeVariant="light"
+                />
+              </View>
+            )}
+
+            {showTimePicker && (
+              <View className="border-2 border-secondary-100 rounded-xl overflow-hidden bg-white">
+                <DateTimePicker
+                  value={arrivalDateTime}
+                  mode="time"
+                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                  is24Hour={false}
+                  onChange={handleTimeChange}
+                  themeVariant="light"
+                />
+              </View>
+            )}
+
+            <Text className="text-secondary-400 text-xs mt-2">
+              Tap date for calendar • tap time for clock picker
+            </Text>
           </View>
 
           {/* Destination */}

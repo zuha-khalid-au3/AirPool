@@ -2,6 +2,11 @@ import { create } from 'zustand';
 import * as SecureStore from 'expo-secure-store';
 import api from '../services/api';
 
+const normalizeUser = (user) => {
+  if (!user) return null;
+  return { ...user, id: user.id || user._id, isGuest: user.isGuest || false };
+};
+
 export const useAuthStore = create((set, get) => ({
   user: null,
   isAuthenticated: false,
@@ -18,12 +23,12 @@ export const useAuthStore = create((set, get) => ({
         api.defaults.headers.common['Authorization'] = `Bearer ${tokens.accessToken}`;
 
         const response = await api.get('/auth/me');
-        const user = response.data.data.user;
+        const user = normalizeUser(response.data.data.user);
         set({
           user,
           tokens,
           isAuthenticated: true,
-          isGuest: user.isGuest || false,
+          isGuest: user.isGuest,
           isLoading: false,
         });
       } else {
@@ -34,11 +39,11 @@ export const useAuthStore = create((set, get) => ({
       try {
         await get().refreshToken();
         const response = await api.get('/auth/me');
-        const user = response.data.data.user;
+        const user = normalizeUser(response.data.data.user);
         set({
           user,
           isAuthenticated: true,
-          isGuest: user.isGuest || false,
+          isGuest: user.isGuest,
           isLoading: false,
         });
       } catch (refreshError) {
@@ -71,7 +76,7 @@ export const useAuthStore = create((set, get) => ({
     await SecureStore.deleteItemAsync('guest_user_id');
     api.defaults.headers.common['Authorization'] = `Bearer ${tokens.accessToken}`;
 
-    set({ user, tokens, isAuthenticated: true, isGuest: false });
+    set({ user: normalizeUser(user), tokens, isAuthenticated: true, isGuest: false });
     return { user, isNewUser };
   },
 
@@ -87,7 +92,7 @@ export const useAuthStore = create((set, get) => ({
     }
     api.defaults.headers.common['Authorization'] = `Bearer ${tokens.accessToken}`;
 
-    set({ user, tokens, isAuthenticated: true, isGuest: true });
+    set({ user: normalizeUser(user), tokens, isAuthenticated: true, isGuest: true });
     return user;
   },
 
@@ -100,7 +105,7 @@ export const useAuthStore = create((set, get) => ({
     await SecureStore.deleteItemAsync('guest_user_id');
     api.defaults.headers.common['Authorization'] = `Bearer ${tokens.accessToken}`;
 
-    set({ user, tokens, isAuthenticated: true, isGuest: false });
+    set({ user: normalizeUser(user), tokens, isAuthenticated: true, isGuest: false });
     return user;
   },
 
@@ -121,7 +126,7 @@ export const useAuthStore = create((set, get) => ({
 
   // Update user profile
   updateUser: (userData) => {
-    set({ user: { ...get().user, ...userData } });
+    set({ user: normalizeUser({ ...get().user, ...userData }) });
   },
 
   // Logout

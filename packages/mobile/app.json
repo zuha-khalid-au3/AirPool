@@ -12,7 +12,9 @@
       "resizeMode": "contain",
       "backgroundColor": "#0284C7"
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.zuhakhalid.airpool",
@@ -49,7 +51,8 @@
       "expo-secure-store",
       "expo-camera",
       "expo-location",
-      "expo-notifications"
+      "expo-notifications",
+      "@react-native-community/datetimepicker"
     ],
     "experiments": {
       "autolinkingModuleResolution": true
