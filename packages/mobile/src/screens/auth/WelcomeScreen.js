@@ -2,11 +2,14 @@ import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuthStore } from '../../store/authStore';
+import { useGoogleAuth } from '../../hooks/useGoogleAuth';
 import { API_BASE_URL, usingExpoTunnel } from '../../config/env';
 import { getNetworkErrorMessage } from '../../config/env.utils';
 
 export default function WelcomeScreen({ navigation }) {
   const guestLogin = useAuthStore((state) => state.guestLogin);
+  const googleAuth = useAuthStore((state) => state.googleAuth);
+  const { signIn: signInWithGoogle, isLoading: isGoogleLoading, isConfigured } = useGoogleAuth();
   const [isGuestLoading, setIsGuestLoading] = useState(false);
 
   const handleGuestLogin = async () => {
@@ -22,6 +25,22 @@ export default function WelcomeScreen({ navigation }) {
       Alert.alert('Guest login failed', message);
     } finally {
       setIsGuestLoading(false);
+    }
+  };
+
+  const handleGoogleLogin = async () => {
+    try {
+      const authentication = await signInWithGoogle();
+      if (!authentication) return;
+
+      await googleAuth(authentication);
+    } catch (error) {
+      const message =
+        error.response?.data?.error?.message ||
+        (error.message === 'Network Error'
+          ? getNetworkErrorMessage(API_BASE_URL, usingExpoTunnel)
+          : error.message || 'Unable to sign in with Google. Please try again.');
+      Alert.alert('Google login failed', message);
     }
   };
 
@@ -75,6 +94,24 @@ export default function WelcomeScreen({ navigation }) {
           >
             <Text className="text-secondary-700 text-lg font-semibold">I have an account</Text>
           </TouchableOpacity>
+
+          {isConfigured && (
+            <TouchableOpacity
+              className="border-2 border-secondary-200 w-full py-4 rounded-xl items-center mb-4 flex-row justify-center"
+              onPress={handleGoogleLogin}
+              disabled={isGoogleLoading}
+              activeOpacity={0.8}
+            >
+              {isGoogleLoading ? (
+                <ActivityIndicator color="#0284C7" />
+              ) : (
+                <>
+                  <Text className="text-lg mr-2">G</Text>
+                  <Text className="text-secondary-700 text-lg font-semibold">Continue with Google</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          )}
 
           <TouchableOpacity
             className="w-full py-4 rounded-xl items-center"

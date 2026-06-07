@@ -17,7 +17,15 @@ router.post(
 );
 
 // Google OAuth
-router.post('/google', authRateLimiter, authController.googleAuth);
+router.post('/google', authRateLimiter, validate(schemas.googleAuth), authController.googleAuth);
+router.post(
+  '/google/session',
+  authRateLimiter,
+  validate(schemas.googleSessionExchange),
+  authController.googleSessionExchange
+);
+router.get('/google/start', authController.googleOAuthStart);
+router.get('/google/callback', authController.googleOAuthCallback);
 
 // Guest login
 router.post(

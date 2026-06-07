@@ -45,6 +45,19 @@ const schemas = {
     guestId: Joi.string().optional(),
   }),
 
+  googleAuth: Joi.object({
+    idToken: Joi.string().optional(),
+    googleId: Joi.string().optional(),
+    email: Joi.string().email().optional(),
+    name: Joi.string().optional(),
+    avatar: Joi.string().optional(),
+    phone: Joi.string().optional(),
+  }).or('idToken', 'googleId'),
+
+  googleSessionExchange: Joi.object({
+    session: Joi.string().required(),
+  }),
+
   updateProfile: Joi.object({
     name: Joi.string().min(2).max(100),
     email: Joi.string().email(),

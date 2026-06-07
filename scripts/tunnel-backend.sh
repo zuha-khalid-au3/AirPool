@@ -18,13 +18,13 @@ ngrok_configured() {
 start_ngrok() {
   echo "Exposing AirPool backend on port ${PORT} via ngrok..."
   print_usage_hint
-  exec ngrok http "$PORT"
+  exec ngrok http "127.0.0.1:${PORT}"
 }
 
 start_cloudflared() {
   echo "Exposing AirPool backend on port ${PORT} via Cloudflare Tunnel (no account required)..."
   print_usage_hint
-  exec cloudflared tunnel --url "http://localhost:${PORT}"
+  exec cloudflared tunnel --url "http://127.0.0.1:${PORT}"
 }
 
 case "$PROVIDER" in

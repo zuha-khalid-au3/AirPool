@@ -96,9 +96,9 @@ export const useAuthStore = create((set, get) => ({
     return user;
   },
 
-  // Google Auth
-  googleAuth: async (googleData) => {
-    const response = await api.post('/auth/google', googleData);
+  // Google Auth (browser flow via backend — works in Expo Go + tunnel)
+  googleAuth: async ({ session }) => {
+    const response = await api.post('/auth/google/session', { session });
     const { user, tokens } = response.data.data;
 
     await SecureStore.setItemAsync('auth_tokens', JSON.stringify(tokens));
@@ -106,7 +106,7 @@ export const useAuthStore = create((set, get) => ({
     api.defaults.headers.common['Authorization'] = `Bearer ${tokens.accessToken}`;
 
     set({ user: normalizeUser(user), tokens, isAuthenticated: true, isGuest: false });
-    return user;
+    return normalizeUser(user);
   },
 
   // Refresh token

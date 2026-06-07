@@ -1,9 +1,17 @@
 const rateLimit = require('express-rate-limit');
 
+const isDev = process.env.NODE_ENV === 'development';
+const rateLimitDisabled =
+  process.env.RATE_LIMIT_DISABLED === 'true' || process.env.RATE_LIMIT_DISABLED === '1';
+
 // General API rate limiter
 const rateLimiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000'), // 15 minutes
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '100'),
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000', 10), // 15 minutes
+  max: parseInt(
+    process.env.RATE_LIMIT_MAX_REQUESTS || (isDev ? '10000' : '100'),
+    10
+  ),
+  skip: () => isDev || rateLimitDisabled,
   message: {
     success: false,
     error: {
@@ -18,7 +26,8 @@ const rateLimiter = rateLimit({
 // Strict rate limiter for OTP endpoints
 const otpRateLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
-  max: 3, // 3 OTP requests per minute
+  max: isDev ? 100 : 3,
+  skip: () => rateLimitDisabled,
   message: {
     success: false,
     error: {
@@ -31,7 +40,8 @@ const otpRateLimiter = rateLimit({
 // Auth rate limiter
 const authRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 10, // 10 auth attempts per 15 minutes
+  max: isDev ? 100 : 10,
+  skip: () => rateLimitDisabled,
   message: {
     success: false,
     error: {

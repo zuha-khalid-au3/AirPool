@@ -1,4 +1,8 @@
-require('dotenv').config({ path: '../../.env' });
+const path = require('path');
+
+// Load root .env first, then packages/backend/.env (backend values take precedence)
+require('dotenv').config({ path: path.join(__dirname, '../../../.env') });
+require('dotenv').config({ path: path.join(__dirname, '../.env') });
 
 const express = require('express');
 const http = require('http');

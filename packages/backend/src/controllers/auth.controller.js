@@ -3,6 +3,7 @@ const { generateAccessToken, generateRefreshToken, verifyToken } = require('../u
 const { generateOTP } = require('../utils/encryption');
 const { getRedisClient } = require('../config/redis');
 const { AppError } = require('../middleware/errorHandler');
+const { verifyGoogleIdToken, exchangeGoogleAuthCode, getGoogleOAuthCallbackUrl } = require('../utils/googleAuth');
 const logger = require('../utils/logger');
 const { v4: uuidv4 } = require('uuid');
 
@@ -32,6 +33,31 @@ const issueUserTokens = async (user) => {
     tokens: { accessToken, refreshToken },
   };
 };
+
+async function upsertGoogleUser({ googleId, email, name, avatar, phone }) {
+  let user = await User.findOne({
+    $or: [{ googleId }, { email: email.toLowerCase() }, ...(phone ? [{ phone }] : [])],
+  });
+
+  if (user) {
+    if (!user.googleId) user.googleId = googleId;
+    if (!user.email) user.email = email.toLowerCase();
+    if (!user.name && name) user.name = name;
+    if (!user.avatar && avatar) user.avatar = avatar;
+    user.isGuest = false;
+    await user.save({ validateBeforeSave: false });
+  } else {
+    user = await User.create({
+      googleId,
+      email: email.toLowerCase(),
+      name,
+      avatar,
+      phone: phone || `google_${googleId}`,
+    });
+  }
+
+  return user;
+}
 
 // Send OTP
 const sendOTP = async (req, res, next) => {
@@ -115,42 +141,119 @@ const verifyOTP = async (req, res, next) => {
 // Google OAuth
 const googleAuth = async (req, res, next) => {
   try {
-    const { googleId, email, name, avatar, phone } = req.body;
+    let { googleId, email, name, avatar, phone, idToken } = req.body;
+
+    if (idToken) {
+      const verified = await verifyGoogleIdToken(idToken);
+      googleId = verified.googleId;
+      email = verified.email;
+      name = verified.name || name;
+      avatar = verified.avatar || avatar;
+    }
 
     if (!googleId || !email) {
       throw new AppError('Google ID and email are required', 400, 'MISSING_FIELDS');
     }
 
-    // Find user by Google ID or phone
-    let user = await User.findOne({
-      $or: [{ googleId }, ...(phone ? [{ phone }] : [])],
-    });
-
-    if (user) {
-      // Link Google account if not already linked
-      if (!user.googleId) {
-        user.googleId = googleId;
-      }
-      if (!user.email) user.email = email;
-      if (!user.name) user.name = name;
-      if (!user.avatar) user.avatar = avatar;
-    } else {
-      // Create new user with Google
-      user = await User.create({
-        googleId,
-        email,
-        name,
-        avatar,
-        phone: phone || `google_${googleId}`,
-      });
-    }
-
+    const user = await upsertGoogleUser({ googleId, email, name, avatar, phone });
     const authData = await issueUserTokens(user);
 
     res.status(200).json({
       success: true,
       message: 'Google authentication successful',
       data: authData,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Browser-based Google OAuth for Expo Go (redirect goes through your public backend URL)
+const googleOAuthStart = async (req, res, next) => {
+  try {
+    if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+      throw new AppError('Google OAuth is not configured on the server', 503, 'GOOGLE_NOT_CONFIGURED');
+    }
+
+    const returnUrl = req.query.returnUrl || 'airpool://auth';
+    const state = uuidv4();
+    const redis = getRedisClient();
+
+    await redis.setEx(`google_oauth_state:${state}`, 300, JSON.stringify({ returnUrl }));
+
+    const params = new URLSearchParams({
+      client_id: process.env.GOOGLE_CLIENT_ID,
+      redirect_uri: getGoogleOAuthCallbackUrl(),
+      response_type: 'code',
+      scope: 'openid email profile',
+      state,
+      access_type: 'online',
+      prompt: 'select_account',
+    });
+
+    res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`);
+  } catch (error) {
+    next(error);
+  }
+};
+
+const googleOAuthCallback = async (req, res, next) => {
+  try {
+    const { code, state, error } = req.query;
+
+    if (error) {
+      throw new AppError(`Google OAuth error: ${error}`, 401, 'GOOGLE_OAUTH_ERROR');
+    }
+
+    if (!code || !state) {
+      throw new AppError('Missing Google OAuth parameters', 400, 'INVALID_OAUTH_CALLBACK');
+    }
+
+    const redis = getRedisClient();
+    const statePayload = await redis.get(`google_oauth_state:${state}`);
+
+    if (!statePayload) {
+      throw new AppError('OAuth state expired. Please try again.', 400, 'OAUTH_STATE_EXPIRED');
+    }
+
+    await redis.del(`google_oauth_state:${state}`);
+    const { returnUrl } = JSON.parse(statePayload);
+
+    const tokenPayload = await exchangeGoogleAuthCode(code);
+    const profile = await verifyGoogleIdToken(tokenPayload.id_token);
+    const user = await upsertGoogleUser(profile);
+    const authData = await issueUserTokens(user);
+
+    const sessionCode = uuidv4();
+    await redis.setEx(
+      `google_login_session:${sessionCode}`,
+      120,
+      JSON.stringify(authData)
+    );
+
+    const separator = returnUrl.includes('?') ? '&' : '?';
+    res.redirect(`${returnUrl}${separator}session=${sessionCode}`);
+  } catch (error) {
+    next(error);
+  }
+};
+
+const googleSessionExchange = async (req, res, next) => {
+  try {
+    const { session } = req.body;
+    const redis = getRedisClient();
+    const payload = await redis.get(`google_login_session:${session}`);
+
+    if (!payload) {
+      throw new AppError('Login session expired. Please try Google sign-in again.', 400, 'GOOGLE_SESSION_EXPIRED');
+    }
+
+    await redis.del(`google_login_session:${session}`);
+
+    res.status(200).json({
+      success: true,
+      message: 'Google authentication successful',
+      data: JSON.parse(payload),
     });
   } catch (error) {
     next(error);
@@ -304,6 +407,9 @@ module.exports = {
   sendOTP,
   verifyOTP,
   googleAuth,
+  googleOAuthStart,
+  googleOAuthCallback,
+  googleSessionExchange,
   refreshToken,
   logout,
   guestLogin,

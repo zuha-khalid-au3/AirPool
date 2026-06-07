@@ -167,6 +167,63 @@ Share the QR code from the Expo terminal. Testers can open it in **Expo Go** fro
 
 ---
 
+## 🔐 Google Sign-In Setup
+
+AirPool uses a **backend Google OAuth flow** that works with **Expo Go + ngrok/tunnel** (the old `auth.expo.io` proxy no longer works reliably).
+
+### 1. Google Cloud Console (Web client)
+
+1. Open [Google Cloud Console → Credentials](https://console.cloud.google.com/apis/credentials)
+2. Create an **OAuth consent screen** (External) and add your Gmail as a **Test user**
+3. Create a **Web application** OAuth client
+4. Copy the **Client ID** and **Client secret**
+
+**Authorized redirect URIs** — add your public backend callback URL:
+
+Local:
+```text
+http://localhost:5000/api/v1/auth/google/callback
+```
+
+Remote (ngrok/cloudflared — use your current public URL):
+```text
+https://YOUR-PUBLIC-URL.ngrok-free.app/api/v1/auth/google/callback
+```
+
+You do **not** need `auth.expo.io` or `exp://` URLs for this flow.
+
+### 2. Environment variables
+
+**Backend** (`packages/backend/.env`):
+
+```env
+GOOGLE_CLIENT_ID=your-web-client-id.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=your-web-client-secret
+GOOGLE_REDIRECT_BASE_URL=https://YOUR-PUBLIC-URL.ngrok-free.app
+```
+
+For local-only testing, set `GOOGLE_REDIRECT_BASE_URL=http://localhost:5000`.
+
+**Mobile** (`packages/mobile/.env`):
+
+```env
+EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID=your-web-client-id.apps.googleusercontent.com
+```
+
+(`EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID` enables the button; login runs through the backend.)
+
+### 3. Restart and test
+
+```bash
+make dev-backend
+make tunnel-backend   # if testing remotely
+cd packages/mobile && yarn dev:remote
+```
+
+Tap **Continue with Google** — the browser opens your backend, Google redirects to your ngrok callback, then back to the app.
+
+---
+
 ## 🎛️ Managing App UI via Admin Panel (Server-Driven UI)
 
 AirPool uses **Server-Driven UI (SDUI)**. You can change the theme colors, active airports, vehicle passenger capacities, and announcements in real-time without redeploying the mobile app.

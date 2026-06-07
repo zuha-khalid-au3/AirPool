@@ -3,6 +3,7 @@
     "name": "AirPool",
     "slug": "airpool",
     "version": "1.0.0",
+    "owner": "zuhakhalid",
     "orientation": "portrait",
     "icon": "./src/assets/images/icon.png",
     "scheme": "airpool",
@@ -62,7 +63,7 @@
     },
     "extra": {
       "eas": {
-        "projectId": "your-eas-project-id"
+        "projectId": "b6c2d3ad-0eae-430d-8e8c-d3d2cdbfbca2"
       }
     }
   }

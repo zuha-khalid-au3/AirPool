@@ -7,7 +7,8 @@ services:
     container_name: airpool-mongodb
     restart: unless-stopped
     ports:
-      - '27017:27017'
+      # 27018 avoids conflict with a local mongod often bound to localhost:27017
+      - '27018:27017'
     environment:
       MONGO_INITDB_ROOT_USERNAME: airpool_admin
       MONGO_INITDB_ROOT_PASSWORD: airpool_secret_2024
@@ -23,7 +24,8 @@ services:
     container_name: airpool-redis
     restart: unless-stopped
     ports:
-      - '6379:6379'
+      # 6380 avoids conflict with a local redis-server often bound to localhost:6379
+      - '6380:6379'
     command: redis-server --requirepass airpool_redis_2024
     volumes:
       - redis_data:/data
