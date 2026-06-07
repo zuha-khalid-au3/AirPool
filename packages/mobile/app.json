@@ -57,6 +57,9 @@
     "experiments": {
       "autolinkingModuleResolution": true
     },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
     "extra": {
       "eas": {
         "projectId": "your-eas-project-id"

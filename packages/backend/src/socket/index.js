@@ -3,6 +3,27 @@ const Message = require('../models/Message');
 const User = require('../models/User');
 const logger = require('../utils/logger');
 
+function serializeChatMessage(message, senderUser) {
+  const messageObj = message.toObject({ virtuals: true });
+  const populatedSender = message.sender?.name ? message.sender : senderUser;
+
+  messageObj.sender = {
+    _id: populatedSender?._id || populatedSender?.id || messageObj.sender,
+    name: populatedSender?.name || 'Unknown',
+    avatar: populatedSender?.avatar,
+  };
+
+  return messageObj;
+}
+
+function serializeSender(senderUser) {
+  return {
+    _id: senderUser._id || senderUser.id,
+    name: senderUser.name,
+    avatar: senderUser.avatar,
+  };
+}
+
 const setupSocketHandlers = (io, redisClient) => {
   // Authentication middleware for Socket.io
   io.use(async (socket, next) => {
@@ -80,9 +101,11 @@ const setupSocketHandlers = (io, redisClient) => {
 
         await message.populate('sender', 'name avatar');
 
+        const serializedMessage = serializeChatMessage(message, socket.user);
+
         // Broadcast to room
         io.to(chatRoomId).emit('new_message', {
-          message: message.toObject(),
+          message: serializedMessage,
         });
 
         // Acknowledge to sender
@@ -90,6 +113,7 @@ const setupSocketHandlers = (io, redisClient) => {
           localId: data.localId,
           messageId: message._id,
           timestamp: message.createdAt,
+          sender: serializeSender(socket.user),
         });
       } catch (error) {
         socket.emit('message_error', {

@@ -1,6 +1,7 @@
 import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
 import { API_BASE_URL } from '../config/env';
+import { isNgrokUrl } from '../config/env.utils';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -10,9 +11,14 @@ const api = axios.create({
   },
 });
 
-// Request interceptor - add auth token
+// Request interceptor - add auth token and ngrok bypass header
 api.interceptors.request.use(
   async (config) => {
+    const requestUrl = config.baseURL || API_BASE_URL;
+    if (isNgrokUrl(requestUrl) || isNgrokUrl(config.url)) {
+      config.headers['ngrok-skip-browser-warning'] = 'true';
+    }
+
     try {
       const tokenData = await SecureStore.getItemAsync('auth_tokens');
       if (tokenData) {

@@ -7,6 +7,10 @@
   "main": "index.js",
   "scripts": {
     "start": "expo start",
+    "start:lan": "expo start --lan",
+    "start:tunnel": "expo start --tunnel",
+    "start:remote": "expo start --tunnel",
+    "dev:remote": "bash ../../scripts/start-remote-mobile.sh",
     "ios": "expo run:ios",
     "android": "expo run:android",
     "web": "expo start --web",
@@ -15,6 +19,7 @@
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",
+    "@expo/ngrok": "^4.1.0",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-community/datetimepicker": "8.4.4",
     "@react-navigation/bottom-tabs": "^7.0.0",

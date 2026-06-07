@@ -121,6 +121,50 @@ Once you run `yarn start` or `make dev` in the mobile directory, the Expo CLI wi
 2. Set up a Virtual Device (AVD) via the Device Manager.
 3. In your Expo terminal, press `a` to open AirPool in the emulator.
 
+#### Option D: Remote Testers (Outside Your Wi-Fi / Network)
+
+Remote users need two things: the **Expo app bundle** (via tunnel) and a **public backend URL** (your API is not reachable over the internet by default).
+
+**Terminal 1 — start backend and Docker services:**
+```bash
+make dev-backend
+```
+
+**Terminal 2 — expose backend port 5000 to the internet:**
+```bash
+make tunnel-backend
+```
+This uses **Cloudflare Tunnel** by default (no account required). Install with `brew install cloudflared`.
+
+If you prefer ngrok, sign up at [ngrok.com](https://dashboard.ngrok.com/signup), run `ngrok config add-authtoken YOUR_TOKEN`, then:
+```bash
+TUNNEL_PROVIDER=ngrok make tunnel-backend
+```
+
+Copy the `https://...` URL printed in this terminal.
+
+**Terminal 3 — start Expo in tunnel mode with the public API URL:**
+
+From the **project root** (`AirPool/`):
+```bash
+AIRPOOL_PUBLIC_API_URL=https://YOUR-FULL-PUBLIC-URL make dev-remote
+```
+
+Or from `packages/mobile`:
+```bash
+AIRPOOL_PUBLIC_API_URL=https://YOUR-FULL-PUBLIC-URL yarn dev:remote
+```
+
+Use the **full** URL from ngrok/cloudflared (e.g. `https://abc123.ngrok-free.app`, not just `.ngrok`).
+
+Share the QR code from the Expo terminal. Testers can open it in **Expo Go** from anywhere — same Wi-Fi is not required.
+
+**Notes:**
+- Log in to Expo first if tunnel mode asks: `npx expo login`
+- You must use `yarn dev:remote` (not plain `yarn start:tunnel`) so the app points at your public backend URL
+- Check the Expo terminal logs for `[AirPool] API: https://...` — if it shows `localhost`, remote login will fail
+- For production-style sharing without your laptop running, deploy the backend and use `eas build` / `eas update` (run `npx eas init` in `packages/mobile` once)
+
 ---
 
 ## 🎛️ Managing App UI via Admin Panel (Server-Driven UI)

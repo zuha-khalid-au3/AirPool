@@ -26,47 +26,63 @@ export default function GroupChatScreen({ navigation, route }) {
   const typingTimeout = useRef(null);
 
   useEffect(() => {
-    // Connect socket and join room
+    let isActive = true;
+
+    const handleNewMessage = (data) => {
+      if (!idsMatch(getUserId(data.message.sender), userId)) {
+        receiveMessage(data.message);
+      }
+    };
+
+    const handleMessageSent = (data) => {
+      confirmMessageSent(data.localId, data.messageId, data.timestamp, data.sender);
+    };
+
+    const handleUserTyping = (data) => {
+      setTypingUser(data.userId, data.name);
+    };
+
+    const handleUserStoppedTyping = (data) => {
+      removeTypingUser(data.userId);
+    };
+
+    const handleConnectionStatus = (data) => {
+      setConnected(data.connected);
+      if (data.connected) {
+        socketService.joinRoom(chatRoomId);
+      }
+    };
+
     const setup = async () => {
-      await socketService.connect();
-      socketService.joinRoom(chatRoomId);
+      const connected = await socketService.connect();
+      if (!isActive) return;
+
+      socketService.on('new_message', handleNewMessage);
+      socketService.on('message_sent', handleMessageSent);
+      socketService.on('user_typing', handleUserTyping);
+      socketService.on('user_stopped_typing', handleUserStoppedTyping);
+      socketService.on('connection_status', handleConnectionStatus);
+
+      if (connected) {
+        socketService.joinRoom(chatRoomId);
+      }
+
       await loadMessages(chatRoomId);
-
-      // Listen for events
-      socketService.on('new_message', (data) => {
-        if (!idsMatch(data.message.sender, userId)) {
-          receiveMessage(data.message);
-        }
-      });
-
-      socketService.on('message_sent', (data) => {
-        confirmMessageSent(data.localId, data.messageId, data.timestamp);
-      });
-
-      socketService.on('user_typing', (data) => {
-        setTypingUser(data.userId, data.name);
-      });
-
-      socketService.on('user_stopped_typing', (data) => {
-        removeTypingUser(data.userId);
-      });
-
-      socketService.on('connection_status', (data) => {
-        setConnected(data.connected);
-      });
     };
 
     setup();
 
     return () => {
+      isActive = false;
+      socketService.off('new_message', handleNewMessage);
+      socketService.off('message_sent', handleMessageSent);
+      socketService.off('user_typing', handleUserTyping);
+      socketService.off('user_stopped_typing', handleUserStoppedTyping);
+      socketService.off('connection_status', handleConnectionStatus);
       socketService.leaveRoom(chatRoomId);
-      socketService.off('new_message');
-      socketService.off('message_sent');
-      socketService.off('user_typing');
-      socketService.off('user_stopped_typing');
       clearMessages();
     };
-  }, [chatRoomId]);
+  }, [chatRoomId, userId]);
 
   const handleSend = () => {
     if (!inputText.trim()) return;
@@ -97,8 +113,12 @@ export default function GroupChatScreen({ navigation, route }) {
   };
 
   const renderMessage = ({ item: message }) => {
-    const isOwnMessage = idsMatch(message.sender, userId);
+    const isOwnMessage =
+      message.isLocal || idsMatch(getUserId(message.sender), userId);
     const isSystem = message.messageType === 'system';
+    const senderName = isOwnMessage
+      ? user?.name || 'You'
+      : message.sender?.name || 'Unknown';
 
     if (isSystem) {
       return (
@@ -114,7 +134,7 @@ export default function GroupChatScreen({ navigation, route }) {
       <View className={`mb-3 ${isOwnMessage ? 'items-end' : 'items-start'}`}>
         {!isOwnMessage && (
           <Text className="text-secondary-400 text-xs mb-1 ml-3">
-            {message.sender?.name || 'Unknown'}
+            {senderName}
           </Text>
         )}
         <View
@@ -177,7 +197,10 @@ export default function GroupChatScreen({ navigation, route }) {
           ref={flatListRef}
           data={messages}
           renderItem={renderMessage}
-          keyExtractor={(item) => item._id || item.localId || Math.random().toString()}
+          keyExtractor={(item, index) => {
+            const id = item._id || item.localId;
+            return id ? String(id) : `message-${index}`;
+          }}
           contentContainerStyle={{ padding: 16, paddingBottom: 8 }}
           onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
           ListEmptyComponent={

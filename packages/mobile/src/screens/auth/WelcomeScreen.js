@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuthStore } from '../../store/authStore';
+import { API_BASE_URL, usingExpoTunnel } from '../../config/env';
+import { getNetworkErrorMessage } from '../../config/env.utils';
 
 export default function WelcomeScreen({ navigation }) {
   const guestLogin = useAuthStore((state) => state.guestLogin);
@@ -15,7 +17,7 @@ export default function WelcomeScreen({ navigation }) {
       const message =
         error.response?.data?.error?.message ||
         (error.message === 'Network Error'
-          ? 'Cannot reach the server. Make sure the backend is running and your phone is on the same Wi-Fi network.'
+          ? getNetworkErrorMessage(API_BASE_URL, usingExpoTunnel)
           : error.message || 'Unable to continue as guest. Please try again.');
       Alert.alert('Guest login failed', message);
     } finally {

@@ -2,7 +2,7 @@
 # AirPool - Development Commands
 # ============================================
 
-.PHONY: help setup dev stop clean
+.PHONY: help setup dev stop clean dev-mobile dev-mobile-tunnel dev-remote tunnel-backend
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -44,8 +44,30 @@ dev-backend: ## Start only backend
 	docker-compose up -d
 	cd packages/backend && yarn dev
 
-dev-mobile: ## Start only mobile app
+dev-mobile: ## Start only mobile app (same Wi-Fi / simulator)
 	cd packages/mobile && yarn start
+
+dev-mobile-tunnel: ## Start mobile app with Expo tunnel (share QR outside local network)
+	cd packages/mobile && yarn start:tunnel
+
+tunnel-backend: ## Expose backend port 5000 via ngrok or cloudflared
+	@chmod +x scripts/tunnel-backend.sh
+	@./scripts/tunnel-backend.sh
+
+dev-remote: ## Remote testing: backend + Expo tunnel (requires AIRPOOL_PUBLIC_API_URL)
+ifndef AIRPOOL_PUBLIC_API_URL
+	@echo "Remote access requires a public backend URL."
+	@echo ""
+	@echo "Terminal 1: make dev-backend"
+	@echo "Terminal 2: make tunnel-backend"
+	@echo "Terminal 3 (from project root):"
+	@echo "  AIRPOOL_PUBLIC_API_URL=https://YOUR-PUBLIC-URL make dev-remote"
+	@echo "Or from packages/mobile:"
+	@echo "  AIRPOOL_PUBLIC_API_URL=https://YOUR-PUBLIC-URL yarn dev:remote"
+	@exit 1
+endif
+	@chmod +x scripts/start-remote-mobile.sh
+	@./scripts/start-remote-mobile.sh
 
 dev-admin: ## Start only admin panel
 	cd packages/admin && yarn dev

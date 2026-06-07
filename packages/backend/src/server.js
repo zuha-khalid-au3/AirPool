@@ -97,8 +97,8 @@ const startServer = async () => {
     setupSocketHandlers(io, getRedisClient());
     logger.info('Socket.io handlers initialized');
 
-    // Start listening
-    server.listen(PORT, () => {
+    // Start listening (0.0.0.0 allows LAN devices and tunnel proxies)
+    server.listen(PORT, '0.0.0.0', () => {
       logger.info(`AirPool API Server running on port ${PORT}`);
       logger.info(`Admin Panel available at http://localhost:${PORT}/admin`);
       logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);

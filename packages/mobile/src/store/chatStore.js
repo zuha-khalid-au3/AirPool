@@ -1,6 +1,54 @@
 import { create } from 'zustand';
 import api from '../services/api';
 import { socketService } from '../services/socket.service';
+import { useAuthStore } from './authStore';
+import { getUserId } from '../utils/user';
+
+function dedupeMessagesById(messages) {
+  const seen = new Set();
+
+  return messages.filter((message) => {
+    const id = String(message._id || message.localId || '');
+    if (!id || seen.has(id)) {
+      return false;
+    }
+
+    seen.add(id);
+    return true;
+  });
+}
+
+function buildSenderSnapshot(user) {
+  if (!user) return null;
+
+  return {
+    _id: getUserId(user),
+    name: user.name,
+    avatar: user.avatar,
+  };
+}
+
+function normalizeMessageSender(message) {
+  if (message.sender && typeof message.sender === 'object' && message.sender.name) {
+    return message;
+  }
+
+  const senderId =
+    typeof message.sender === 'string' ? message.sender : getUserId(message.sender);
+
+  if (!senderId) {
+    return message;
+  }
+
+  return {
+    ...message,
+    sender: {
+      _id: senderId,
+      name: message.sender?.name || 'Unknown',
+      avatar: message.sender?.avatar,
+    },
+  };
+}
 
 export const useChatStore = create((set, get) => ({
   messages: [],
@@ -16,9 +64,14 @@ export const useChatStore = create((set, get) => ({
       const newMessages = response.data.data.messages;
 
       if (page === 1) {
-        set({ messages: newMessages });
+        set({ messages: dedupeMessagesById(newMessages.map(normalizeMessageSender)) });
       } else {
-        set((state) => ({ messages: [...newMessages, ...state.messages] }));
+        set((state) => ({
+          messages: dedupeMessagesById([
+            ...newMessages.map(normalizeMessageSender),
+            ...state.messages,
+          ]),
+        }));
       }
 
       return response.data.data.hasMore;
@@ -31,10 +84,13 @@ export const useChatStore = create((set, get) => ({
   // Send a message via socket
   sendMessage: (chatRoomId, content, messageType = 'text', metadata = null) => {
     const localId = `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const sender = buildSenderSnapshot(useAuthStore.getState().user);
 
     const localMessage = {
       _id: localId,
+      localId,
       chatRoomId,
+      sender,
       content,
       messageType,
       metadata,
@@ -67,29 +123,42 @@ export const useChatStore = create((set, get) => ({
 
   // Handle incoming message from socket
   receiveMessage: (message) => {
+    const normalizedMessage = normalizeMessageSender(message);
+
     set((state) => {
-      // Replace local message with server message if it exists
-      const updatedMessages = state.messages.map((m) =>
-        m.isLocal && m._id === message.localId ? { ...message, isLocal: false } : m
+      const messageId = String(normalizedMessage._id);
+
+      let updatedMessages = state.messages.map((m) =>
+        m.isLocal && normalizedMessage.localId && m.localId === normalizedMessage.localId
+          ? { ...normalizedMessage, isLocal: false }
+          : m
       );
 
-      // If not replacing a local message, add it
-      const exists = state.messages.some((m) => m._id === message._id);
+      const exists = updatedMessages.some((m) => String(m._id) === messageId);
       if (!exists) {
-        updatedMessages.push(message);
+        updatedMessages.push(normalizedMessage);
       }
 
-      return { messages: updatedMessages };
+      return { messages: dedupeMessagesById(updatedMessages) };
     });
   },
 
   // Message sent confirmation
-  confirmMessageSent: (localId, messageId, timestamp) => {
+  confirmMessageSent: (localId, messageId, timestamp, sender) => {
     set((state) => ({
-      messages: state.messages.map((m) =>
-        m._id === localId
-          ? { ...m, _id: messageId, deliveryStatus: 'delivered', createdAt: timestamp, isLocal: false }
-          : m
+      messages: dedupeMessagesById(
+        state.messages.map((m) =>
+          m._id === localId || m.localId === localId
+            ? {
+                ...m,
+                _id: messageId,
+                sender: sender || m.sender,
+                deliveryStatus: 'delivered',
+                createdAt: timestamp,
+                isLocal: false,
+              }
+            : m
+        )
       ),
     }));
   },
