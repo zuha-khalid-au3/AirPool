@@ -1,5 +1,6 @@
 const session = require('express-session');
 const MongoStore = require('connect-mongo');
+const mongoose = require('mongoose');
 
 const User = require('../models/User');
 const FlightTicket = require('../models/FlightTicket');
@@ -11,9 +12,9 @@ const SuspiciousActivity = require('../models/SuspiciousActivity');
 const setupAdminPanel = async (app) => {
   const { default: AdminJS } = await import('adminjs');
   const { default: AdminJSExpress } = await import('@adminjs/express');
-  const { default: AdminJSMongoose } = await import('@adminjs/mongoose');
+  const { Database, Resource } = await import('@adminjs/mongoose');
 
-  AdminJS.registerAdapter(AdminJSMongoose);
+  AdminJS.registerAdapter({ Database, Resource });
   const adminJs = new AdminJS({
     resources: [
       {
@@ -118,21 +119,32 @@ const setupAdminPanel = async (app) => {
   });
 
   // Admin authentication
+  const isDev = process.env.NODE_ENV === 'development';
+  const sessionStore = isDev
+    ? new session.MemoryStore()
+    : MongoStore.create({
+        client: mongoose.connection.getClient(),
+        dbName: mongoose.connection.name,
+        collectionName: 'admin_sessions',
+      });
+
   const adminRouter = AdminJSExpress.buildAuthenticatedRouter(
     adminJs,
     {
       authenticate: async (email, password) => {
-        const adminEmail = process.env.ADMIN_EMAIL || 'admin@airpool.app';
+        const adminEmail = (process.env.ADMIN_EMAIL || 'admin@airpool.app').toLowerCase();
         const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
+        const normalizedEmail = (email || '').toLowerCase().trim();
 
-        if (email === adminEmail && password === adminPassword) {
+        if (normalizedEmail === adminEmail && password === adminPassword) {
           return { email: adminEmail, role: 'admin' };
         }
 
-        // Check database for admin users
-        const user = await User.findOne({ email, role: 'admin' });
-        if (user) {
-          // For DB admins, use a simple password check (in production, use bcrypt)
+        const user = await User.findOne({
+          email: normalizedEmail,
+          role: { $in: ['admin', 'moderator'] },
+        });
+        if (user && password === adminPassword) {
           return { email: user.email, role: user.role, id: user._id };
         }
 
@@ -143,10 +155,7 @@ const setupAdminPanel = async (app) => {
     },
     null,
     {
-      store: MongoStore.create({
-        mongoUrl: process.env.MONGODB_URI || 'mongodb://localhost:27017/airpool',
-        ttl: 24 * 60 * 60, // 1 day
-      }),
+      store: sessionStore,
       resave: false,
       saveUninitialized: false,
       secret: process.env.JWT_SECRET || 'airpool-session-secret',

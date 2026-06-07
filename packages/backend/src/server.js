@@ -41,12 +41,10 @@ const io = new Server(server, {
   },
 });
 
-// Middleware
+// Middleware (body parsers are registered after AdminJS in startServer)
 app.use(helmet());
 app.use(cors());
 app.use(morgan('combined'));
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true }));
 app.use(rateLimiter);
 
 // Health Check
@@ -59,17 +57,20 @@ app.get('/health', (req, res) => {
   });
 });
 
-// API Routes
-app.use('/api/v1/auth', authRoutes);
-app.use('/api/v1/users', userRoutes);
-app.use('/api/v1/pools', poolRoutes);
-app.use('/api/v1/chat', chatRoutes);
-app.use('/api/v1/tickets', ticketRoutes);
-app.use('/api/v1/config', configRoutes);
-app.use('/api/v1/admin', adminRoutes);
+const registerApiRoutes = () => {
+  app.use(express.json({ limit: '10mb' }));
+  app.use(express.urlencoded({ extended: true }));
 
-// Error Handler (must be last)
-app.use(errorHandler);
+  app.use('/api/v1/auth', authRoutes);
+  app.use('/api/v1/users', userRoutes);
+  app.use('/api/v1/pools', poolRoutes);
+  app.use('/api/v1/chat', chatRoutes);
+  app.use('/api/v1/tickets', ticketRoutes);
+  app.use('/api/v1/config', configRoutes);
+  app.use('/api/v1/admin', adminRoutes);
+
+  app.use(errorHandler);
+};
 
 // Start Server
 const PORT = process.env.PORT || 5000;
@@ -89,13 +90,15 @@ const startServer = async () => {
     await connectRabbitMQ();
     logger.info('RabbitMQ connected successfully');
 
-    // Setup AdminJS Panel (optional — React admin dashboard uses JWT API)
+    // AdminJS must be mounted before express.json/urlencoded (uses express-formidable)
     try {
       await setupAdminPanel(app);
       logger.info('Admin panel initialized at /admin');
     } catch (error) {
       logger.warn({ err: error }, 'AdminJS panel failed to initialize; API will continue without /admin');
     }
+
+    registerApiRoutes();
 
     // Setup Socket.io handlers
     setupSocketHandlers(io, getRedisClient());
