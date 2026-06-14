@@ -1,9 +1,18 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import {
-  View, Text, TouchableOpacity, FlatList, KeyboardAvoidingView,
-  Platform, Alert, Modal, Image, StyleSheet,
+  View,
+  Text,
+  TouchableOpacity,
+  FlatList,
+  KeyboardAvoidingView,
+  Platform,
+  Alert,
+  Modal,
+  Image,
+  StyleSheet,
+  ScrollView,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { useChatStore } from '../../store/chatStore';
 import { useCallStore } from '../../store/callStore';
@@ -14,23 +23,43 @@ import ScreenHeader from '../../components/ui/ScreenHeader';
 import MessageBubble from '../../components/chat/MessageBubble';
 import ChatComposer from '../../components/chat/ChatComposer';
 import IncomingCallBanner from '../../components/chat/IncomingCallBanner';
+import Avatar from '../../components/ui/Avatar';
 import { getUserId, idsMatch } from '../../utils/user';
+
+const EMPTY_MESSAGES = [];
 
 export default function GroupChatScreen({ navigation, route }) {
   const { chatRoomId, poolId } = route.params;
   const { user } = useAuthStore();
   const userId = getUserId(user);
+  const insets = useSafeAreaInsets();
   const { currentPool, getPoolDetails } = usePoolStore();
   const {
     incomingCall, setIncomingCall, setOutgoingCall, setActiveCall, clearCall,
   } = useCallStore();
-  const {
-    messages, loadMessages, sendMessage, sendMediaMessage, receiveMessage,
-    confirmMessageSent, typingUsers, setTypingUser, removeTypingUser,
-    setConnected, clearMessages, shareLiveLocation, stopActiveLiveSession,
-    activeLiveSession, updateLiveLocation, markLiveLocationStopped,
-    syncOfflineMessages,
-  } = useChatStore();
+
+  const messages = useChatStore(
+    (state) => state.messagesByRoom[chatRoomId] || EMPTY_MESSAGES
+  );
+  const onlineUserIds = useChatStore(
+    (state) => state.onlineUsersByRoom[chatRoomId] || []
+  );
+  const typingUsers = useChatStore(
+    (state) => state.typingUsersByRoom[chatRoomId] || []
+  );
+  const isConnected = useChatStore((state) => state.isConnected);
+
+  const loadMessages = useChatStore((state) => state.loadMessages);
+  const sendMessage = useChatStore((state) => state.sendMessage);
+  const sendMediaMessage = useChatStore((state) => state.sendMediaMessage);
+  const setTypingUser = useChatStore((state) => state.setTypingUser);
+  const removeTypingUser = useChatStore((state) => state.removeTypingUser);
+  const clearRoomState = useChatStore((state) => state.clearRoomState);
+  const shareLiveLocation = useChatStore((state) => state.shareLiveLocation);
+  const stopActiveLiveSession = useChatStore((state) => state.stopActiveLiveSession);
+  const activeLiveSession = useChatStore((state) => state.activeLiveSession);
+  const updateLiveLocation = useChatStore((state) => state.updateLiveLocation);
+  const markLiveLocationStopped = useChatStore((state) => state.markLiveLocationStopped);
 
   const [inputText, setInputText] = useState('');
   const [isTyping, setIsTyping] = useState(false);
@@ -40,10 +69,14 @@ export default function GroupChatScreen({ navigation, route }) {
   const flatListRef = useRef(null);
   const typingTimeout = useRef(null);
 
+  const headerHeight = insets.top + 56;
+
   const otherMembers =
     currentPool?.members?.filter(
       (m) => m.status === 'active' && !idsMatch(getUserId(m.user), userId)
     ) || [];
+
+  const onlineSet = useMemo(() => new Set(onlineUserIds.map(String)), [onlineUserIds]);
 
   useEffect(() => {
     if (poolId) getPoolDetails(poolId);
@@ -55,63 +88,56 @@ export default function GroupChatScreen({ navigation, route }) {
     });
   }, []);
 
+  const lastMessageKey = messages.length
+    ? String(messages[messages.length - 1]._id || messages[messages.length - 1].localId)
+    : 'empty';
+
   useEffect(() => {
     if (messages.length > 0) {
       scrollToLatest(false);
     }
-  }, [messages.length, scrollToLatest]);
+  }, [lastMessageKey, scrollToLatest]);
 
   useFocusEffect(
     useCallback(() => {
       let active = true;
 
-      const rejoinRoom = async () => {
-        const connected = await socketService.connect();
-        if (!active || !connected) return;
+      const joinChat = async () => {
+        await socketService.connect();
+        if (!active) return;
+
         socketService.joinRoom(chatRoomId);
-        await loadMessages(chatRoomId);
+
+        const existing = useChatStore.getState().messagesByRoom[chatRoomId];
+        if (!existing?.length) {
+          await loadMessages(chatRoomId);
+        }
+
         scrollToLatest(false);
       };
 
-      rejoinRoom();
+      joinChat();
 
       return () => {
         active = false;
+        socketService.leaveRoom(chatRoomId);
+        clearRoomState(chatRoomId);
       };
-    }, [chatRoomId, loadMessages, scrollToLatest])
+    }, [chatRoomId, loadMessages, scrollToLatest, clearRoomState])
   );
 
   useEffect(() => {
     let isActive = true;
 
-    const handleNewMessage = (data) => {
-      if (data.message?.chatRoomId !== chatRoomId) return;
-      if (idsMatch(getUserId(data.message.sender), userId)) return;
-      receiveMessage(data.message, chatRoomId);
-      scrollToLatest();
+    const handleUserTyping = (data) => {
+      if (data.chatRoomId !== chatRoomId) return;
+      if (idsMatch(data.userId, userId)) return;
+      setTypingUser(chatRoomId, data.userId, data.name);
     };
 
-    const handleMessageSent = (data) => {
-      if (data.message?.chatRoomId && data.message.chatRoomId !== chatRoomId) return;
-      confirmMessageSent(
-        data.localId,
-        data.messageId,
-        data.timestamp,
-        data.sender,
-        data.message
-      );
-      scrollToLatest();
-    };
-
-    const handleUserTyping = (data) => setTypingUser(data.userId, data.name);
-    const handleUserStoppedTyping = (data) => removeTypingUser(data.userId);
-
-    const handleConnectionStatus = (data) => {
-      setConnected(data.connected);
-      if (data.connected) {
-        socketService.joinRoom(chatRoomId);
-        syncOfflineMessages();
-      }
+    const handleUserStoppedTyping = (data) => {
+      if (data.chatRoomId !== chatRoomId) return;
+      removeTypingUser(chatRoomId, data.userId);
     };
 
     const handleLiveUpdate = (data) => updateLiveLocation(data.liveSessionId, data);
@@ -143,39 +169,22 @@ export default function GroupChatScreen({ navigation, route }) {
     };
     const handleCallEnded = () => clearCall();
 
-    const setup = async () => {
-      await socketService.connect();
-      if (!isActive) return;
-
-      socketService.on('new_message', handleNewMessage);
-      socketService.on('message_sent', handleMessageSent);
-      socketService.on('user_typing', handleUserTyping);
-      socketService.on('user_stopped_typing', handleUserStoppedTyping);
-      socketService.on('connection_status', handleConnectionStatus);
-      socketService.on('live_location_update', handleLiveUpdate);
-      socketService.on('live_location_stop', handleLiveStop);
-      socketService.on('call_invite', handleCallInvite);
-      socketService.on('call_ringing', handleCallRinging);
-      socketService.on('call_accepted', handleCallAccepted);
-      socketService.on('call_connected', handleCallConnected);
-      socketService.on('call_rejected', handleCallRejected);
-      socketService.on('call_unavailable', handleCallUnavailable);
-      socketService.on('call_ended', handleCallEnded);
-
-      socketService.joinRoom(chatRoomId);
-      await loadMessages(chatRoomId);
-      scrollToLatest(false);
-    };
-
-    setup();
+    socketService.on('user_typing', handleUserTyping);
+    socketService.on('user_stopped_typing', handleUserStoppedTyping);
+    socketService.on('live_location_update', handleLiveUpdate);
+    socketService.on('live_location_stop', handleLiveStop);
+    socketService.on('call_invite', handleCallInvite);
+    socketService.on('call_ringing', handleCallRinging);
+    socketService.on('call_accepted', handleCallAccepted);
+    socketService.on('call_connected', handleCallConnected);
+    socketService.on('call_rejected', handleCallRejected);
+    socketService.on('call_unavailable', handleCallUnavailable);
+    socketService.on('call_ended', handleCallEnded);
 
     return () => {
       isActive = false;
-      socketService.off('new_message', handleNewMessage);
-      socketService.off('message_sent', handleMessageSent);
       socketService.off('user_typing', handleUserTyping);
       socketService.off('user_stopped_typing', handleUserStoppedTyping);
-      socketService.off('connection_status', handleConnectionStatus);
       socketService.off('live_location_update', handleLiveUpdate);
       socketService.off('live_location_stop', handleLiveStop);
       socketService.off('call_invite', handleCallInvite);
@@ -187,10 +196,8 @@ export default function GroupChatScreen({ navigation, route }) {
       socketService.off('call_ended', handleCallEnded);
       stopActiveLiveSession();
       clearCall();
-      socketService.leaveRoom(chatRoomId);
-      clearMessages();
     };
-  }, [chatRoomId, userId, scrollToLatest]);
+  }, [chatRoomId, userId]);
 
   useEffect(() => {
     setSharingLocation(!!activeLiveSession && activeLiveSession.chatRoomId === chatRoomId);
@@ -201,6 +208,7 @@ export default function GroupChatScreen({ navigation, route }) {
     sendMessage(chatRoomId, inputText.trim());
     setInputText('');
     socketService.stopTyping(chatRoomId);
+    scrollToLatest(true);
   };
 
   const handleShareLocation = async () => {
@@ -222,6 +230,7 @@ export default function GroupChatScreen({ navigation, route }) {
     setSendingMedia(true);
     try {
       await sendMediaMessage(chatRoomId, file);
+      scrollToLatest(true);
     } catch (error) {
       Alert.alert('Upload failed', error.response?.data?.error?.message || error.message);
     } finally {
@@ -250,7 +259,7 @@ export default function GroupChatScreen({ navigation, route }) {
     }
 
     const buttons = otherMembers.map((m) => ({
-      text: m.user?.name || 'Member',
+      text: `${m.user?.name || 'Member'}${onlineSet.has(String(getUserId(m.user))) ? ' · online' : ''}`,
       onPress: () => {
         socketService.inviteCall(chatRoomId, getUserId(m.user), 'voice');
         setOutgoingCall({ chatRoomId, calleeId: getUserId(m.user) });
@@ -321,14 +330,17 @@ export default function GroupChatScreen({ navigation, route }) {
     );
   };
 
+  const totalMembers = otherMembers.length + 1;
+  const onlineCount = onlineSet.size || (isConnected ? 1 : 0);
+
   const subtitle = typingUsers.length
     ? `${typingUsers.map((u) => u.name).join(', ')} typing…`
     : sharingLocation
       ? 'You are sharing live location'
-      : `${otherMembers.length + 1} members in chat`;
+      : `${onlineCount} online · ${totalMembers} members`;
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <IncomingCallBanner
         call={incomingCall}
         onAccept={acceptIncomingCall}
@@ -359,50 +371,89 @@ export default function GroupChatScreen({ navigation, route }) {
         }
       />
 
-      <View style={styles.chatBody}>
-        <KeyboardAvoidingView
-          style={styles.flex}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+      {otherMembers.length > 0 && (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.presenceStrip}
+          contentContainerStyle={styles.presenceStripContent}
         >
-          <FlatList
-            ref={flatListRef}
-            data={messages}
-            renderItem={renderMessage}
-            keyExtractor={(item, index) => {
-              const id = item._id || item.localId;
-              return id ? String(id) : `message-${index}`;
-            }}
-            style={styles.messageList}
-            contentContainerStyle={[
-              styles.messageListContent,
-              messages.length === 0 && styles.messageListContentEmpty,
-            ]}
-            keyboardShouldPersistTaps="handled"
-            keyboardDismissMode="interactive"
-            onContentSizeChange={() => scrollToLatest(false)}
-            ListEmptyComponent={
-              <View style={styles.emptyState}>
-                <Text style={styles.emptyEmoji}>💬</Text>
-                <Text style={styles.emptyTitle}>Start the conversation</Text>
-                <Text style={styles.emptySubtitle}>
-                  Share text, photos, voice notes, live location, or start a voice call.
+          <View style={styles.presenceItem}>
+            <View style={styles.avatarWrap}>
+              <Avatar name={user?.name} size={34} />
+              <View style={[styles.statusDot, styles.statusOnline]} />
+            </View>
+            <Text style={styles.presenceName} numberOfLines={1}>You</Text>
+          </View>
+          {otherMembers.map((m) => {
+            const memberId = String(getUserId(m.user));
+            const isOnline = onlineSet.has(memberId);
+            return (
+              <View key={memberId} style={styles.presenceItem}>
+                <View style={styles.avatarWrap}>
+                  <Avatar name={m.user?.name} size={34} />
+                  <View
+                    style={[
+                      styles.statusDot,
+                      isOnline ? styles.statusOnline : styles.statusOffline,
+                    ]}
+                  />
+                </View>
+                <Text style={styles.presenceName} numberOfLines={1}>
+                  {m.user?.name?.split(' ')[0]}
                 </Text>
               </View>
-            }
-          />
+            );
+          })}
+        </ScrollView>
+      )}
 
-          <ChatComposer
-            inputText={inputText}
-            onChangeText={handleTyping}
-            onSend={handleSend}
-            onShareLocation={handleShareLocation}
-            onSendMedia={handleSendMedia}
-            sharingLocation={sharingLocation}
-            sendingMedia={sendingMedia}
-          />
-        </KeyboardAvoidingView>
-      </View>
+      <KeyboardAvoidingView
+        style={styles.chatBody}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? headerHeight : 0}
+      >
+        <FlatList
+          ref={flatListRef}
+          data={messages}
+          renderItem={renderMessage}
+          keyExtractor={(item, index) => {
+            const id = item._id || item.localId;
+            return id ? String(id) : `message-${index}`;
+          }}
+          style={styles.messageList}
+          contentContainerStyle={[
+            styles.messageListContent,
+            messages.length === 0 && styles.messageListContentEmpty,
+          ]}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
+          automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+          onContentSizeChange={() => scrollToLatest(false)}
+          extraData={lastMessageKey}
+          ListEmptyComponent={
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyEmoji}>💬</Text>
+              <Text style={styles.emptyTitle}>Start the conversation</Text>
+              <Text style={styles.emptySubtitle}>
+                Share text, photos, voice notes, live location, or start a voice call.
+              </Text>
+            </View>
+          }
+        />
+
+        <ChatComposer
+          inputText={inputText}
+          onChangeText={handleTyping}
+          onSend={handleSend}
+          onShareLocation={handleShareLocation}
+          onSendMedia={handleSendMedia}
+          sharingLocation={sharingLocation}
+          sendingMedia={sendingMedia}
+          bottomInset={insets.bottom}
+          onInputFocus={() => scrollToLatest(true)}
+        />
+      </KeyboardAvoidingView>
 
       <Modal visible={!!previewImage} transparent animationType="fade">
         <View style={styles.previewBackdrop}>
@@ -430,9 +481,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#F8FAFC',
   },
-  flex: {
-    flex: 1,
-  },
   chatBody: {
     flex: 1,
   },
@@ -452,6 +500,46 @@ const styles = StyleSheet.create({
   headerActionBtnPrimary: {
     backgroundColor: 'rgba(2,132,199,0.1)',
   },
+  presenceStrip: {
+    maxHeight: 72,
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  presenceStripContent: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    alignItems: 'center',
+  },
+  presenceItem: {
+    alignItems: 'center',
+    marginRight: 14,
+  },
+  avatarWrap: {
+    position: 'relative',
+  },
+  statusDot: {
+    position: 'absolute',
+    right: 0,
+    bottom: 0,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+  },
+  statusOnline: {
+    backgroundColor: '#22C55E',
+  },
+  statusOffline: {
+    backgroundColor: '#94A3B8',
+  },
+  presenceName: {
+    color: '#64748B',
+    fontSize: 11,
+    marginTop: 4,
+    maxWidth: 52,
+  },
   messageList: {
     flex: 1,
   },
@@ -459,9 +547,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 12,
     paddingBottom: 8,
+    flexGrow: 1,
   },
   messageListContentEmpty: {
-    flexGrow: 1,
     justifyContent: 'center',
   },
   emptyState: {

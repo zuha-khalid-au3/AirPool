@@ -9,13 +9,15 @@ import * as SplashScreen from 'expo-splash-screen';
 import AppNavigator from './src/navigation/AppNavigator';
 import { useAuthStore } from './src/store/authStore';
 import { useConfigStore } from './src/store/configStore';
+import { useChatStore } from './src/store/chatStore';
+import { socketService } from './src/services/socket.service';
 
-// Keep splash screen visible while loading
 SplashScreen.preventAutoHideAsync();
 
 export default function App() {
-  const { checkAuth, isLoading } = useAuthStore();
+  const { checkAuth, isLoading, isAuthenticated } = useAuthStore();
   const { fetchConfig } = useConfigStore();
+  const initSocketListeners = useChatStore((state) => state.initSocketListeners);
 
   useEffect(() => {
     const initialize = async () => {
@@ -31,6 +33,17 @@ export default function App() {
 
     initialize();
   }, []);
+
+  useEffect(() => {
+    if (!isAuthenticated) return undefined;
+
+    initSocketListeners();
+    socketService.connect();
+
+    return () => {
+      socketService.disconnect();
+    };
+  }, [isAuthenticated, initSocketListeners]);
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>

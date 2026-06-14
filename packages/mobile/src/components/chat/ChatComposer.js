@@ -21,6 +21,8 @@ export default function ChatComposer({
   onSendMedia,
   sharingLocation = false,
   sendingMedia = false,
+  bottomInset = 0,
+  onInputFocus,
 }) {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
@@ -139,7 +141,7 @@ export default function ChatComposer({
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingBottom: Math.max(bottomInset, 12) }]}>
       {isRecording && (
         <View style={styles.recordingBanner}>
           <View style={styles.recordingDot} />
@@ -206,6 +208,7 @@ export default function ChatComposer({
           multiline
           value={inputText}
           onChangeText={onChangeText}
+          onFocus={onInputFocus}
           editable={!isRecording}
         />
 
@@ -225,7 +228,7 @@ export default function ChatComposer({
 const styles = StyleSheet.create({
   container: {
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingTop: 12,
     borderTopWidth: 1,
     borderTopColor: '#F1F5F9',
     backgroundColor: '#FFFFFF',

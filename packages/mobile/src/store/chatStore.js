@@ -61,41 +61,134 @@ function sortMessagesByTime(messages) {
   });
 }
 
+function updateRoomMessages(state, chatRoomId, updater) {
+  const current = state.messagesByRoom[chatRoomId] || [];
+  const next = updater(current);
+  return {
+    messagesByRoom: {
+      ...state.messagesByRoom,
+      [chatRoomId]: sortMessagesByTime(dedupeMessagesById(next)),
+    },
+  };
+}
+
 export const useChatStore = create((set, get) => ({
-  messages: [],
+  messagesByRoom: {},
+  onlineUsersByRoom: {},
   offlineMessages: [],
   isConnected: false,
-  typingUsers: [],
+  typingUsersByRoom: {},
   memberLocations: {},
   liveLocations: {},
   activeLiveSession: null,
+  socketListenersReady: false,
 
-  // Load messages for a chat room
+  getRoomMessages: (chatRoomId) => get().messagesByRoom[chatRoomId] || [],
+
+  getRoomOnlineUsers: (chatRoomId) => get().onlineUsersByRoom[chatRoomId] || [],
+
+  getRoomTypingUsers: (chatRoomId) => get().typingUsersByRoom[chatRoomId] || [],
+
+  initSocketListeners: () => {
+    if (get().socketListenersReady) return;
+
+    socketService.on('new_message', (data) => {
+      const roomId = data.chatRoomId || data.message?.chatRoomId;
+      if (!roomId || !data.message) return;
+      get().receiveMessage(data.message, roomId);
+    });
+
+    socketService.on('message_sent', (data) => {
+      const roomId = data.chatRoomId || data.message?.chatRoomId;
+      if (!roomId) return;
+      get().confirmMessageSent(
+        data.localId,
+        data.messageId,
+        data.timestamp,
+        data.sender,
+        data.message,
+        roomId
+      );
+    });
+
+    socketService.on('room_presence', (data) => {
+      if (data.chatRoomId && Array.isArray(data.onlineUserIds)) {
+        get().setRoomPresence(data.chatRoomId, data.onlineUserIds);
+      }
+    });
+
+    socketService.on('user_online', (data) => {
+      if (data.chatRoomId && data.userId) {
+        get().markUserOnline(data.chatRoomId, String(data.userId));
+      }
+    });
+
+    socketService.on('user_offline', (data) => {
+      if (data.chatRoomId && data.userId) {
+        get().markUserOffline(data.chatRoomId, String(data.userId));
+      }
+    });
+
+    socketService.on('connection_status', (data) => {
+      get().setConnected(data.connected);
+      if (data.connected) {
+        get().syncOfflineMessages();
+      }
+    });
+
+    set({ socketListenersReady: true });
+  },
+
+  setRoomPresence: (chatRoomId, onlineUserIds) => {
+    set((state) => ({
+      onlineUsersByRoom: {
+        ...state.onlineUsersByRoom,
+        [chatRoomId]: onlineUserIds.map(String),
+      },
+    }));
+  },
+
+  markUserOnline: (chatRoomId, userId) => {
+    set((state) => {
+      const current = state.onlineUsersByRoom[chatRoomId] || [];
+      const id = String(userId);
+      if (current.includes(id)) return state;
+      return {
+        onlineUsersByRoom: {
+          ...state.onlineUsersByRoom,
+          [chatRoomId]: [...current, id],
+        },
+      };
+    });
+  },
+
+  markUserOffline: (chatRoomId, userId) => {
+    set((state) => {
+      const id = String(userId);
+      const current = state.onlineUsersByRoom[chatRoomId] || [];
+      return {
+        onlineUsersByRoom: {
+          ...state.onlineUsersByRoom,
+          [chatRoomId]: current.filter((uid) => uid !== id),
+        },
+      };
+    });
+  },
+
   loadMessages: async (chatRoomId, page = 1) => {
     try {
       const response = await api.get(`/chat/${chatRoomId}/messages?page=${page}`);
-      const newMessages = response.data.data.messages;
+      const newMessages = response.data.data.messages.map(normalizeMessageSender).map((message) =>
+        enrichMessageMedia(message, chatRoomId)
+      );
 
-      if (page === 1) {
-        set({
-          messages: sortMessagesByTime(
-            dedupeMessagesById(
-              newMessages
-                .map(normalizeMessageSender)
-                .map((message) => enrichMessageMedia(message, chatRoomId))
-            )
-          ),
-        });
-      } else {
-        set((state) => ({
-          messages: dedupeMessagesById([
-            ...newMessages
-              .map(normalizeMessageSender)
-              .map((message) => enrichMessageMedia(message, chatRoomId)),
-            ...state.messages,
-          ]),
-        }));
-      }
+      set((state) => {
+        if (page === 1) {
+          return updateRoomMessages(state, chatRoomId, () => newMessages);
+        }
+
+        return updateRoomMessages(state, chatRoomId, (current) => [...newMessages, ...current]);
+      });
 
       return response.data.data.hasMore;
     } catch (error) {
@@ -104,7 +197,6 @@ export const useChatStore = create((set, get) => ({
     }
   },
 
-  // Send a message via socket
   sendMessage: (chatRoomId, content, messageType = 'text', metadata = null) => {
     const localId = `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const sender = buildSenderSnapshot(useAuthStore.getState().user);
@@ -125,12 +217,8 @@ export const useChatStore = create((set, get) => ({
       chatRoomId
     );
 
-    // Add to local messages immediately
-    set((state) => ({
-      messages: sortMessagesByTime(dedupeMessagesById([...state.messages, localMessage])),
-    }));
+    set((state) => updateRoomMessages(state, chatRoomId, (current) => [...current, localMessage]));
 
-    // Send via socket (strip client-only fields like localUri)
     const sent = socketService.sendMessage({
       localId,
       chatRoomId,
@@ -140,9 +228,11 @@ export const useChatStore = create((set, get) => ({
     });
 
     if (!sent) {
-      // Store as offline message
       set((state) => ({
-        offlineMessages: [...state.offlineMessages, { ...localMessage, deliveryStatus: 'offline_queued' }],
+        offlineMessages: [
+          ...state.offlineMessages,
+          { ...localMessage, deliveryStatus: 'offline_queued' },
+        ],
       }));
     }
 
@@ -160,64 +250,63 @@ export const useChatStore = create((set, get) => ({
     const content = messageType === 'image' ? '📷 Photo' : '🎤 Voice message';
     const metadata = {
       ...upload.metadata,
-      ...(file.uri
-        ? { localUri: file.uri }
-        : {}),
+      ...(file.uri ? { localUri: file.uri } : {}),
     };
     get().sendMessage(chatRoomId, content, messageType, metadata);
   },
 
-  // Handle incoming message from socket
-  receiveMessage: (message, activeChatRoomId = null) => {
-    if (activeChatRoomId && message.chatRoomId && message.chatRoomId !== activeChatRoomId) {
-      return;
-    }
+  receiveMessage: (message, chatRoomId) => {
+    const roomId = chatRoomId || message.chatRoomId;
+    if (!roomId) return;
 
     const normalizedMessage = enrichMessageMedia(
-      normalizeMessageSender(message),
-      message.chatRoomId
+      normalizeMessageSender({ ...message, chatRoomId: roomId }),
+      roomId
     );
 
-    set((state) => {
-      const messageId = String(normalizedMessage._id);
+    set((state) =>
+      updateRoomMessages(state, roomId, (current) => {
+        const messageId = String(normalizedMessage._id);
 
-      let updatedMessages = state.messages.map((m) =>
-        m.isLocal && normalizedMessage.localId && m.localId === normalizedMessage.localId
-          ? {
-              ...normalizedMessage,
-              isLocal: false,
-              metadata: {
-                ...(normalizedMessage.metadata || {}),
-                ...(m.metadata?.localUri ? { localUri: m.metadata.localUri } : {}),
-              },
-            }
-          : m
-      );
+        let updatedMessages = current.map((m) =>
+          m.isLocal && normalizedMessage.localId && m.localId === normalizedMessage.localId
+            ? {
+                ...normalizedMessage,
+                isLocal: false,
+                metadata: {
+                  ...(normalizedMessage.metadata || {}),
+                  ...(m.metadata?.localUri ? { localUri: m.metadata.localUri } : {}),
+                },
+              }
+            : m
+        );
 
-      const exists = updatedMessages.some((m) => String(m._id) === messageId);
-      if (!exists) {
-        updatedMessages.push(normalizedMessage);
-      }
+        const exists = updatedMessages.some((m) => String(m._id) === messageId);
+        if (!exists) {
+          updatedMessages = [...updatedMessages, normalizedMessage];
+        }
 
-      return { messages: sortMessagesByTime(dedupeMessagesById(updatedMessages)) };
-    });
+        return updatedMessages;
+      })
+    );
   },
 
-  // Message sent confirmation
-  confirmMessageSent: (localId, messageId, timestamp, sender, serverMessage) => {
-    set((state) => ({
-      messages: sortMessagesByTime(
-        dedupeMessagesById(
-          state.messages.map((m) => {
+  confirmMessageSent: (localId, messageId, timestamp, sender, serverMessage, chatRoomId) => {
+    const roomId = chatRoomId || serverMessage?.chatRoomId;
+    if (!roomId) return;
+
+    set((state) =>
+      updateRoomMessages(state, roomId, (current) =>
+        current.map((m) => {
           if (m._id !== localId && m.localId !== localId) return m;
 
-          const roomId = serverMessage?.chatRoomId || m.chatRoomId;
           const merged = serverMessage
             ? enrichMessageMedia(
                 {
                   ...serverMessage,
                   _id: messageId,
                   localId: m.localId,
+                  chatRoomId: roomId,
                   isLocal: false,
                   deliveryStatus: 'delivered',
                   createdAt: timestamp || serverMessage.createdAt,
@@ -232,6 +321,7 @@ export const useChatStore = create((set, get) => ({
                 {
                   ...m,
                   _id: messageId,
+                  chatRoomId: roomId,
                   isLocal: false,
                   deliveryStatus: 'delivered',
                   createdAt: timestamp || m.createdAt,
@@ -244,12 +334,10 @@ export const useChatStore = create((set, get) => ({
             sender: sender || merged.sender,
           };
         })
-        )
-      ),
-    }));
+      )
+    );
   },
 
-  // Sync offline messages when back online
   syncOfflineMessages: async () => {
     const { offlineMessages } = get();
     if (offlineMessages.length === 0) return;
@@ -262,31 +350,40 @@ export const useChatStore = create((set, get) => ({
     }
   },
 
-  // Typing indicators
-  setTypingUser: (userId, name) => {
+  setTypingUser: (chatRoomId, userId, name) => {
+    if (!chatRoomId) return;
+
     set((state) => {
-      const exists = state.typingUsers.find((u) => u.userId === userId);
-      if (!exists) {
-        return { typingUsers: [...state.typingUsers, { userId, name }] };
-      }
-      return state;
+      const current = state.typingUsersByRoom[chatRoomId] || [];
+      const exists = current.find((u) => u.userId === userId);
+      if (exists) return state;
+
+      return {
+        typingUsersByRoom: {
+          ...state.typingUsersByRoom,
+          [chatRoomId]: [...current, { userId, name }],
+        },
+      };
     });
 
-    // Auto-remove after 3 seconds
     setTimeout(() => {
-      set((state) => ({
-        typingUsers: state.typingUsers.filter((u) => u.userId !== userId),
-      }));
+      get().removeTypingUser(chatRoomId, userId);
     }, 3000);
   },
 
-  removeTypingUser: (userId) => {
+  removeTypingUser: (chatRoomId, userId) => {
+    if (!chatRoomId) return;
+
     set((state) => ({
-      typingUsers: state.typingUsers.filter((u) => u.userId !== userId),
+      typingUsersByRoom: {
+        ...state.typingUsersByRoom,
+        [chatRoomId]: (state.typingUsersByRoom[chatRoomId] || []).filter(
+          (u) => u.userId !== userId
+        ),
+      },
     }));
   },
 
-  // Member locations
   updateMemberLocation: (userId, locationData) => {
     set((state) => ({
       memberLocations: {
@@ -417,15 +514,13 @@ export const useChatStore = create((set, get) => ({
     set({ activeLiveSession: null });
   },
 
-  // Connection status
   setConnected: (status) => set({ isConnected: status }),
 
-  // Clear messages
-  clearMessages: () =>
-    set({
-      messages: [],
-      typingUsers: [],
-      memberLocations: {},
-      liveLocations: {},
-    }),
+  clearRoomState: (chatRoomId) => {
+    set((state) => {
+      const typingUsersByRoom = { ...state.typingUsersByRoom };
+      delete typingUsersByRoom[chatRoomId];
+      return { typingUsersByRoom };
+    });
+  },
 }));
