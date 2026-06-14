@@ -71,6 +71,7 @@ export default function MessageBubble({
           <AuthenticatedImage
             chatRoomId={roomId}
             objectName={resolvedObjectName}
+            localUri={isOwnMessage ? meta.localUri : null}
             mimeType={meta.mimeType}
             style={imageStyle}
             resizeMode="cover"

@@ -1,9 +1,11 @@
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { API_BASE_URL } from '../config/env';
 import { isNgrokUrl } from '../config/env.utils';
+import api from '../services/api';
 import * as SecureStore from 'expo-secure-store';
 
-const MEDIA_CACHE_DIR = `${FileSystem.cacheDirectory}airpool-chat/`;
+const MEDIA_CACHE_ROOT = FileSystem.cacheDirectory || FileSystem.documentDirectory;
+const MEDIA_CACHE_DIR = `${MEDIA_CACHE_ROOT}airpool-chat/`;
 
 async function getAccessToken() {
   try {
@@ -66,6 +68,14 @@ function getMediaCachePath(objectName) {
   return `${MEDIA_CACHE_DIR}${safeName}`;
 }
 
+export function normalizeLocalFileUri(uri) {
+  if (!uri) return uri;
+  if (uri.startsWith('file://') || uri.startsWith('content://') || uri.startsWith('data:')) {
+    return uri;
+  }
+  return `file://${uri.replace(/^\/+/, '')}`;
+}
+
 async function ensureMediaCacheDir() {
   const info = await FileSystem.getInfoAsync(MEDIA_CACHE_DIR);
   if (!info.exists) {
@@ -73,17 +83,33 @@ async function ensureMediaCacheDir() {
   }
 }
 
-export async function downloadAuthenticatedMediaFile(chatRoomId, objectName) {
-  if (!chatRoomId || !objectName) return null;
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  let binary = '';
 
-  await ensureMediaCacheDir();
-
-  const localUri = getMediaCachePath(objectName);
-  const cached = await FileSystem.getInfoAsync(localUri);
-  if (cached.exists && cached.size > 0) {
-    return localUri;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
   }
 
+  return globalThis.btoa(binary);
+}
+
+async function downloadViaApi(chatRoomId, objectName, localUri) {
+  const response = await api.get(`/chat/${encodeURIComponent(chatRoomId)}/file`, {
+    params: { objectName },
+    responseType: 'arraybuffer',
+  });
+
+  const base64 = arrayBufferToBase64(response.data);
+  await FileSystem.writeAsStringAsync(localUri, base64, {
+    encoding: FileSystem.EncodingType.Base64,
+  });
+
+  return normalizeLocalFileUri(localUri);
+}
+
+async function downloadViaFileSystem(chatRoomId, objectName, localUri) {
   const token = await getAccessToken();
   const url = buildChatMediaUrl(chatRoomId, objectName, token);
   const headers = await getMediaAuthHeaders();
@@ -94,7 +120,32 @@ export async function downloadAuthenticatedMediaFile(chatRoomId, objectName) {
     throw new Error(`Media download failed (${result.status})`);
   }
 
-  return localUri;
+  return normalizeLocalFileUri(result.uri || localUri);
+}
+
+export async function downloadAuthenticatedMediaFile(chatRoomId, objectName) {
+  if (!chatRoomId || !objectName) return null;
+  if (!MEDIA_CACHE_ROOT) {
+    throw new Error('Local file storage is unavailable on this device.');
+  }
+
+  await ensureMediaCacheDir();
+
+  const localUri = getMediaCachePath(objectName);
+  const cached = await FileSystem.getInfoAsync(localUri);
+  if (cached.exists && cached.size > 0) {
+    return normalizeLocalFileUri(localUri);
+  }
+
+  try {
+    return await downloadViaApi(chatRoomId, objectName, localUri);
+  } catch (apiError) {
+    try {
+      return await downloadViaFileSystem(chatRoomId, objectName, localUri);
+    } catch {
+      throw apiError;
+    }
+  }
 }
 
 export function sanitizeOutgoingMetadata(metadata) {

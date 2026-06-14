@@ -1,22 +1,32 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, Image, ActivityIndicator } from 'react-native';
-import { downloadAuthenticatedMediaFile } from '../../utils/chatMedia';
+import { downloadAuthenticatedMediaFile, normalizeLocalFileUri } from '../../utils/chatMedia';
 
 export default function AuthenticatedImage({
   chatRoomId,
   objectName,
   mimeType,
+  localUri,
   style,
   resizeMode = 'cover',
 }) {
-  const [uri, setUri] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [uri, setUri] = useState(localUri ? normalizeLocalFileUri(localUri) : null);
+  const [loading, setLoading] = useState(!localUri);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
 
     async function loadImage() {
+      if (localUri) {
+        if (!cancelled) {
+          setUri(normalizeLocalFileUri(localUri));
+          setLoading(false);
+          setFailed(false);
+        }
+        return;
+      }
+
       if (!chatRoomId || !objectName) {
         if (!cancelled) {
           setFailed(true);
@@ -29,11 +39,12 @@ export default function AuthenticatedImage({
       setFailed(false);
 
       try {
-        const localUri = await downloadAuthenticatedMediaFile(chatRoomId, objectName);
+        const downloadedUri = await downloadAuthenticatedMediaFile(chatRoomId, objectName);
         if (!cancelled) {
-          setUri(localUri);
+          setUri(downloadedUri);
         }
-      } catch {
+      } catch (error) {
+        console.warn('[AuthenticatedImage] load failed:', error?.message || error);
         if (!cancelled) {
           setFailed(true);
         }
@@ -48,7 +59,7 @@ export default function AuthenticatedImage({
     return () => {
       cancelled = true;
     };
-  }, [chatRoomId, objectName, mimeType]);
+  }, [chatRoomId, objectName, localUri, mimeType]);
 
   if (loading) {
     return (

@@ -160,7 +160,9 @@ export const useChatStore = create((set, get) => ({
     const content = messageType === 'image' ? '📷 Photo' : '🎤 Voice message';
     const metadata = {
       ...upload.metadata,
-      ...(messageType === 'voice' && file.uri ? { localUri: file.uri } : {}),
+      ...(file.uri
+        ? { localUri: file.uri }
+        : {}),
     };
     get().sendMessage(chatRoomId, content, messageType, metadata);
   },
