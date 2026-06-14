@@ -27,6 +27,7 @@ import GroupChatScreen from '../screens/chat/GroupChatScreen';
 import InFlightModeScreen from '../screens/chat/InFlightModeScreen';
 import PostLandingMapScreen from '../screens/chat/PostLandingMapScreen';
 import LiveLocationScreen from '../screens/chat/LiveLocationScreen';
+import CallScreen from '../screens/chat/CallScreen';
 
 // Profile Screens
 import ProfileScreen from '../screens/profile/ProfileScreen';
@@ -99,6 +100,11 @@ function HomeStack() {
       <Stack.Screen name="InFlightMode" component={InFlightModeScreen} />
       <Stack.Screen name="PostLandingMap" component={PostLandingMapScreen} />
       <Stack.Screen name="LiveLocation" component={LiveLocationScreen} />
+      <Stack.Screen
+        name="Call"
+        component={CallScreen}
+        options={{ presentation: 'fullScreenModal', animation: 'slide_from_bottom' }}
+      />
     </Stack.Navigator>
   );
 }
@@ -112,6 +118,11 @@ function PoolStack() {
       <Stack.Screen name="GroupChat" component={GroupChatScreen} />
       <Stack.Screen name="LiveLocation" component={LiveLocationScreen} />
       <Stack.Screen name="PostLandingMap" component={PostLandingMapScreen} />
+      <Stack.Screen
+        name="Call"
+        component={CallScreen}
+        options={{ presentation: 'fullScreenModal', animation: 'slide_from_bottom' }}
+      />
     </Stack.Navigator>
   );
 }

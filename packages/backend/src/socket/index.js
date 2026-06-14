@@ -1,7 +1,11 @@
 const { verifyToken } = require('../utils/jwt');
+const { v4: uuidv4 } = require('uuid');
 const Message = require('../models/Message');
 const User = require('../models/User');
+const { resolveMessageMedia } = require('../controllers/chat.controller');
 const logger = require('../utils/logger');
+
+const activeCalls = new Map();
 
 function serializeChatMessage(message, senderUser) {
   const messageObj = message.toObject({ virtuals: true });
@@ -93,7 +97,7 @@ const setupSocketHandlers = (io, redisClient) => {
         const message = await Message.create({
           chatRoomId,
           sender: socket.userId,
-          content,
+          content: content || '',
           messageType,
           metadata,
           deliveryStatus: 'delivered',
@@ -101,19 +105,21 @@ const setupSocketHandlers = (io, redisClient) => {
 
         await message.populate('sender', 'name avatar');
 
-        const serializedMessage = serializeChatMessage(message, socket.user);
+        const resolved = await resolveMessageMedia(message);
+        const serializedMessage = serializeChatMessage(resolved, socket.user);
 
         // Broadcast to room
         io.to(chatRoomId).emit('new_message', {
           message: serializedMessage,
         });
 
-        // Acknowledge to sender
+        // Acknowledge to sender with full resolved message (includes media URLs)
         socket.emit('message_sent', {
           localId: data.localId,
           messageId: message._id,
           timestamp: message.createdAt,
           sender: serializeSender(socket.user),
+          message: serializedMessage,
         });
       } catch (error) {
         socket.emit('message_error', {
@@ -197,6 +203,102 @@ const setupSocketHandlers = (io, redisClient) => {
         meetingPoint,
         timestamp: new Date(),
       });
+    });
+
+    // Voice call signaling
+    socket.on('call_invite', async (data) => {
+      try {
+        const { chatRoomId, calleeId, callType = 'voice' } = data;
+        if (!chatRoomId || !calleeId || calleeId === socket.userId) return;
+
+        const callId = uuidv4();
+        activeCalls.set(callId, {
+          callId,
+          chatRoomId,
+          callerId: socket.userId,
+          calleeId,
+          callType,
+          status: 'ringing',
+          startedAt: new Date(),
+        });
+
+        const payload = {
+          callId,
+          chatRoomId,
+          callType,
+          callerId: socket.userId,
+          caller: serializeSender(socket.user),
+        };
+
+        const calleeSocketId = await redisClient.hGet('online_users', calleeId);
+        if (calleeSocketId) {
+          io.to(calleeSocketId).emit('call_invite', payload);
+          socket.emit('call_ringing', { callId, calleeId, chatRoomId });
+        } else {
+          activeCalls.delete(callId);
+          socket.emit('call_unavailable', {
+            calleeId,
+            reason: 'User is offline',
+          });
+        }
+      } catch (error) {
+        socket.emit('call_error', { error: error.message });
+      }
+    });
+
+    socket.on('call_accept', async (data) => {
+      const { callId } = data;
+      const call = activeCalls.get(callId);
+      if (!call || call.calleeId !== socket.userId) return;
+
+      call.status = 'connected';
+      call.connectedAt = new Date();
+
+      const payload = {
+        callId,
+        chatRoomId: call.chatRoomId,
+        callType: call.callType,
+        callerId: call.callerId,
+        calleeId: call.calleeId,
+        callee: serializeSender(socket.user),
+      };
+
+      const callerSocketId = await redisClient.hGet('online_users', call.callerId);
+      if (callerSocketId) {
+        io.to(callerSocketId).emit('call_accepted', payload);
+      }
+      socket.emit('call_connected', payload);
+    });
+
+    socket.on('call_reject', async (data) => {
+      const { callId, reason = 'declined' } = data;
+      const call = activeCalls.get(callId);
+      if (!call) return;
+
+      const payload = { callId, reason, chatRoomId: call.chatRoomId };
+      const callerSocketId = await redisClient.hGet('online_users', call.callerId);
+
+      if (callerSocketId) {
+        io.to(callerSocketId).emit('call_rejected', payload);
+      }
+      activeCalls.delete(callId);
+    });
+
+    socket.on('call_end', async (data) => {
+      const { callId } = data;
+      const call = activeCalls.get(callId);
+      if (!call) return;
+
+      const payload = { callId, chatRoomId: call.chatRoomId };
+      const otherUserId =
+        call.callerId === socket.userId ? call.calleeId : call.callerId;
+      const otherSocketId = await redisClient.hGet('online_users', otherUserId);
+
+      if (otherSocketId) {
+        io.to(otherSocketId).emit('call_ended', payload);
+      }
+      socket.emit('call_ended', payload);
+      activeCalls.delete(callId);
     });
 
     // Disconnect

@@ -195,6 +195,30 @@ class SocketService {
     }
   }
 
+  inviteCall(chatRoomId, calleeId, callType = 'voice') {
+    if (this.socket?.connected) {
+      this.socket.emit('call_invite', { chatRoomId, calleeId, callType });
+    }
+  }
+
+  acceptCall(callId) {
+    if (this.socket?.connected) {
+      this.socket.emit('call_accept', { callId });
+    }
+  }
+
+  rejectCall(callId, reason = 'declined') {
+    if (this.socket?.connected) {
+      this.socket.emit('call_reject', { callId, reason });
+    }
+  }
+
+  endCall(callId) {
+    if (this.socket?.connected) {
+      this.socket.emit('call_end', { callId });
+    }
+  }
+
   updateMeetingPoint(chatRoomId, meetingPoint) {
     if (this.socket?.connected) {
       this.socket.emit('update_meeting_point', { chatRoomId, meetingPoint });

@@ -45,12 +45,11 @@ export default function WelcomeScreen({ navigation }) {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-white">
+    <SafeAreaView className="flex-1 bg-secondary-50">
       <View className="flex-1 justify-center items-center px-6">
-        {/* Logo & Illustration */}
-        <View className="items-center mb-12">
-          <View className="w-24 h-24 bg-primary-100 rounded-full items-center justify-center mb-6">
-            <Text className="text-4xl">✈️</Text>
+        <View className="items-center mb-10">
+          <View className="w-28 h-28 bg-primary rounded-3xl items-center justify-center mb-6 shadow-lg">
+            <Text className="text-5xl">✈️</Text>
           </View>
           <Text className="text-4xl font-bold text-secondary-900 mb-2">AirPool</Text>
           <Text className="text-lg text-secondary-500 text-center leading-7">
@@ -58,8 +57,7 @@ export default function WelcomeScreen({ navigation }) {
           </Text>
         </View>
 
-        {/* Features */}
-        <View className="w-full mb-12">
+        <View className="w-full mb-10 bg-white rounded-3xl p-5 shadow-sm border border-secondary-100">
           <FeatureItem
             icon="🤝"
             title="Connect with Co-Passengers"
@@ -77,10 +75,9 @@ export default function WelcomeScreen({ navigation }) {
           />
         </View>
 
-        {/* Action Buttons */}
         <View className="w-full">
           <TouchableOpacity
-            className="bg-primary w-full py-4 rounded-xl items-center mb-4"
+            className="bg-primary w-full py-4 rounded-2xl items-center mb-3 shadow-md"
             onPress={() => navigation.navigate('PhoneInput')}
             activeOpacity={0.8}
           >
@@ -88,7 +85,7 @@ export default function WelcomeScreen({ navigation }) {
           </TouchableOpacity>
 
           <TouchableOpacity
-            className="border-2 border-secondary-200 w-full py-4 rounded-xl items-center mb-4"
+            className="border-2 border-secondary-200 bg-white w-full py-4 rounded-2xl items-center mb-3"
             onPress={() => navigation.navigate('PhoneInput')}
             activeOpacity={0.8}
           >

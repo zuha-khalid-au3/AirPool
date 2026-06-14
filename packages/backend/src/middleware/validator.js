@@ -102,8 +102,10 @@ const schemas = {
 
   sendMessage: Joi.object({
     chatRoomId: Joi.string().required(),
-    content: Joi.string().max(2000).required(),
-    messageType: Joi.string().valid('text', 'location', 'image', 'meeting_point').default('text'),
+    content: Joi.string().max(2000).allow('').default(''),
+    messageType: Joi.string()
+      .valid('text', 'location', 'image', 'audio', 'voice', 'meeting_point')
+      .default('text'),
     metadata: Joi.object(),
   }),
 

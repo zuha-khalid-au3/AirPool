@@ -4,6 +4,8 @@ import { socketService } from '../services/socket.service';
 import { useAuthStore } from './authStore';
 import { getUserId } from '../utils/user';
 import { createLiveSessionId } from '../utils/location';
+import { uploadChatMedia } from '../services/chatMedia.service';
+import { enrichMessageMedia } from '../utils/chatMedia';
 
 function dedupeMessagesById(messages) {
   const seen = new Set();
@@ -67,11 +69,19 @@ export const useChatStore = create((set, get) => ({
       const newMessages = response.data.data.messages;
 
       if (page === 1) {
-        set({ messages: dedupeMessagesById(newMessages.map(normalizeMessageSender)) });
+        set({
+          messages: dedupeMessagesById(
+            newMessages
+              .map(normalizeMessageSender)
+              .map((message) => enrichMessageMedia(message, chatRoomId))
+          ),
+        });
       } else {
         set((state) => ({
           messages: dedupeMessagesById([
-            ...newMessages.map(normalizeMessageSender),
+            ...newMessages
+              .map(normalizeMessageSender)
+              .map((message) => enrichMessageMedia(message, chatRoomId)),
             ...state.messages,
           ]),
         }));
@@ -89,18 +99,21 @@ export const useChatStore = create((set, get) => ({
     const localId = `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const sender = buildSenderSnapshot(useAuthStore.getState().user);
 
-    const localMessage = {
-      _id: localId,
-      localId,
-      chatRoomId,
-      sender,
-      content,
-      messageType,
-      metadata,
-      deliveryStatus: 'sent',
-      createdAt: new Date().toISOString(),
-      isLocal: true,
-    };
+    const localMessage = enrichMessageMedia(
+      {
+        _id: localId,
+        localId,
+        chatRoomId,
+        sender,
+        content,
+        messageType,
+        metadata,
+        deliveryStatus: 'sent',
+        createdAt: new Date().toISOString(),
+        isLocal: true,
+      },
+      chatRoomId
+    );
 
     // Add to local messages immediately
     set((state) => ({ messages: [...state.messages, localMessage] }));
@@ -124,16 +137,42 @@ export const useChatStore = create((set, get) => ({
     return localId;
   },
 
+  sendMediaMessage: async (chatRoomId, file) => {
+    const upload = await uploadChatMedia(chatRoomId, file, {
+      duration: file.duration,
+      width: file.width,
+      height: file.height,
+    });
+
+    const messageType = upload.mediaType === 'image' ? 'image' : 'voice';
+    const content = messageType === 'image' ? '📷 Photo' : '🎤 Voice message';
+    const metadata = {
+      ...upload.metadata,
+      ...(messageType === 'voice' && file.uri ? { localUri: file.uri } : {}),
+    };
+    get().sendMessage(chatRoomId, content, messageType, metadata);
+  },
+
   // Handle incoming message from socket
   receiveMessage: (message) => {
-    const normalizedMessage = normalizeMessageSender(message);
+    const normalizedMessage = enrichMessageMedia(
+      normalizeMessageSender(message),
+      message.chatRoomId
+    );
 
     set((state) => {
       const messageId = String(normalizedMessage._id);
 
       let updatedMessages = state.messages.map((m) =>
         m.isLocal && normalizedMessage.localId && m.localId === normalizedMessage.localId
-          ? { ...normalizedMessage, isLocal: false }
+          ? {
+              ...normalizedMessage,
+              isLocal: false,
+              metadata: {
+                ...(normalizedMessage.metadata || {}),
+                ...(m.metadata?.localUri ? { localUri: m.metadata.localUri } : {}),
+              },
+            }
           : m
       );
 
@@ -147,21 +186,45 @@ export const useChatStore = create((set, get) => ({
   },
 
   // Message sent confirmation
-  confirmMessageSent: (localId, messageId, timestamp, sender) => {
+  confirmMessageSent: (localId, messageId, timestamp, sender, serverMessage) => {
     set((state) => ({
       messages: dedupeMessagesById(
-        state.messages.map((m) =>
-          m._id === localId || m.localId === localId
-            ? {
-                ...m,
-                _id: messageId,
-                sender: sender || m.sender,
-                deliveryStatus: 'delivered',
-                createdAt: timestamp,
-                isLocal: false,
-              }
-            : m
-        )
+        state.messages.map((m) => {
+          if (m._id !== localId && m.localId !== localId) return m;
+
+          const roomId = serverMessage?.chatRoomId || m.chatRoomId;
+          const merged = serverMessage
+            ? enrichMessageMedia(
+                {
+                  ...serverMessage,
+                  _id: messageId,
+                  localId: m.localId,
+                  isLocal: false,
+                  deliveryStatus: 'delivered',
+                  createdAt: timestamp || serverMessage.createdAt,
+                  metadata: {
+                    ...(serverMessage.metadata || {}),
+                    ...(m.metadata?.localUri ? { localUri: m.metadata.localUri } : {}),
+                  },
+                },
+                roomId
+              )
+            : enrichMessageMedia(
+                {
+                  ...m,
+                  _id: messageId,
+                  isLocal: false,
+                  deliveryStatus: 'delivered',
+                  createdAt: timestamp || m.createdAt,
+                },
+                roomId
+              );
+
+          return {
+            ...merged,
+            sender: sender || merged.sender,
+          };
+        })
       ),
     }));
   },

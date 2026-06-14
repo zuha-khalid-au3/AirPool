@@ -24,7 +24,8 @@
         "NSBluetoothPeripheralUsageDescription": "AirPool uses Bluetooth to discover nearby passengers.",
         "NSLocationWhenInUseUsageDescription": "AirPool needs your location to show nearby pools and meeting points.",
         "NSLocationAlwaysUsageDescription": "AirPool uses background location for live tracking after landing.",
-        "NSCameraUsageDescription": "AirPool needs camera access for selfie verification."
+        "NSCameraUsageDescription": "AirPool needs camera access for selfie verification.",
+        "NSMicrophoneUsageDescription": "AirPool uses the microphone for voice notes and pool voice calls."
       }
     },
     "android": {
@@ -43,6 +44,7 @@
         "ACCESS_COARSE_LOCATION",
         "ACCESS_BACKGROUND_LOCATION",
         "CAMERA",
+        "RECORD_AUDIO",
         "READ_EXTERNAL_STORAGE",
         "NEARBY_WIFI_DEVICES"
       ]
@@ -52,6 +54,7 @@
       "expo-secure-store",
       "expo-camera",
       "expo-location",
+      "expo-av",
       "expo-notifications",
       "@react-native-community/datetimepicker"
     ],

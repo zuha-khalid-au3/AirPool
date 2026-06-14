@@ -5,12 +5,19 @@ const { AppError } = require('./errorHandler');
 const authenticate = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
+    let token = null;
 
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.split(' ')[1];
+    } else if (req.query.access_token) {
+      // React Native Image cannot send Authorization headers on iOS
+      token = req.query.access_token;
+    }
+
+    if (!token) {
       throw new AppError('Access denied. No token provided.', 401, 'NO_TOKEN');
     }
 
-    const token = authHeader.split(' ')[1];
     const decoded = verifyToken(token);
 
     if (!decoded) {

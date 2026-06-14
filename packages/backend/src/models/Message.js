@@ -19,7 +19,7 @@ const messageSchema = new mongoose.Schema(
     },
     messageType: {
       type: String,
-      enum: ['text', 'location', 'image', 'system', 'meeting_point'],
+      enum: ['text', 'location', 'image', 'audio', 'voice', 'system', 'meeting_point'],
       default: 'text',
     },
     metadata: {
@@ -32,6 +32,14 @@ const messageSchema = new mongoose.Schema(
       isLive: Boolean,
       // For image messages
       imageUrl: String,
+      objectName: String,
+      mimeType: String,
+      fileSize: Number,
+      width: Number,
+      height: Number,
+      // For voice / audio messages
+      audioUrl: String,
+      duration: Number,
       // For system messages
       action: String,
       // For meeting point messages
