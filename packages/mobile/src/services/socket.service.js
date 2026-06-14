@@ -120,12 +120,14 @@ class SocketService {
       this.socket = io(SOCKET_URL, {
         auth: { token: accessToken },
         extraHeaders,
-        transports: ['polling', 'websocket'],
+        transports: ['websocket', 'polling'],
+        upgrade: true,
+        rememberUpgrade: true,
         reconnection: true,
         reconnectionAttempts: Infinity,
-        reconnectionDelay: 1000,
-        reconnectionDelayMax: 5000,
-        timeout: 20000,
+        reconnectionDelay: 500,
+        reconnectionDelayMax: 3000,
+        timeout: 10000,
       });
 
       this.bindServerEvents();
@@ -171,23 +173,36 @@ class SocketService {
   }
 
   joinRoom(chatRoomId) {
-    this.currentRoomId = chatRoomId;
-    this.joinCurrentRoom();
+    this.currentRoomId = chatRoomId != null ? String(chatRoomId) : null;
+    if (this.socket?.connected) {
+      this.socket.emit('join_room', { chatRoomId: this.currentRoomId });
+      return;
+    }
+
+    if (!this.connectPromise) {
+      this.connect();
+    }
   }
 
   leaveRoom(chatRoomId) {
-    if (this.socket?.connected) {
-      this.socket.emit('leave_room', { chatRoomId });
+    const roomId = chatRoomId != null ? String(chatRoomId) : null;
+    if (this.socket?.connected && roomId) {
+      this.socket.emit('leave_room', { chatRoomId: roomId });
     }
 
-    if (this.currentRoomId === chatRoomId) {
+    if (this.currentRoomId === roomId) {
       this.currentRoomId = null;
     }
   }
 
   sendMessage(messageData) {
     if (this.socket?.connected) {
-      this.socket.emit('send_message', messageData);
+      this.socket.emit('send_message', {
+        ...messageData,
+        chatRoomId: messageData.chatRoomId != null
+          ? String(messageData.chatRoomId)
+          : messageData.chatRoomId,
+      });
       return true;
     }
 
@@ -196,13 +211,13 @@ class SocketService {
 
   startTyping(chatRoomId) {
     if (this.socket?.connected) {
-      this.socket.emit('typing_start', { chatRoomId });
+      this.socket.emit('typing_start', { chatRoomId: String(chatRoomId) });
     }
   }
 
   stopTyping(chatRoomId) {
     if (this.socket?.connected) {
-      this.socket.emit('typing_stop', { chatRoomId });
+      this.socket.emit('typing_stop', { chatRoomId: String(chatRoomId) });
     }
   }
 

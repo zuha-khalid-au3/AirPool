@@ -35,14 +35,15 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!isAuthenticated) return undefined;
+    if (!isAuthenticated) {
+      socketService.disconnect();
+      useChatStore.setState({ socketListenersReady: false });
+      return undefined;
+    }
 
     initSocketListeners();
     socketService.connect();
-
-    return () => {
-      socketService.disconnect();
-    };
+    return undefined;
   }, [isAuthenticated, initSocketListeners]);
 
   return (

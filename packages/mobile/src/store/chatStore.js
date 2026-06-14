@@ -7,6 +7,13 @@ import { createLiveSessionId } from '../utils/location';
 import { uploadChatMedia } from '../services/chatMedia.service';
 import { enrichMessageMedia, sanitizeOutgoingMetadata } from '../utils/chatMedia';
 
+const typingClearTimers = new Map();
+
+function normalizeRoomId(chatRoomId) {
+  if (chatRoomId == null || chatRoomId === '') return '';
+  return String(chatRoomId);
+}
+
 function dedupeMessagesById(messages) {
   const seen = new Set();
 
@@ -62,12 +69,15 @@ function sortMessagesByTime(messages) {
 }
 
 function updateRoomMessages(state, chatRoomId, updater) {
-  const current = state.messagesByRoom[chatRoomId] || [];
+  const roomId = normalizeRoomId(chatRoomId);
+  if (!roomId) return state;
+
+  const current = state.messagesByRoom[roomId] || [];
   const next = updater(current);
   return {
     messagesByRoom: {
       ...state.messagesByRoom,
-      [chatRoomId]: sortMessagesByTime(dedupeMessagesById(next)),
+      [roomId]: sortMessagesByTime(dedupeMessagesById(next)),
     },
   };
 }
@@ -83,23 +93,23 @@ export const useChatStore = create((set, get) => ({
   activeLiveSession: null,
   socketListenersReady: false,
 
-  getRoomMessages: (chatRoomId) => get().messagesByRoom[chatRoomId] || [],
+  getRoomMessages: (chatRoomId) => get().messagesByRoom[normalizeRoomId(chatRoomId)] || [],
 
-  getRoomOnlineUsers: (chatRoomId) => get().onlineUsersByRoom[chatRoomId] || [],
+  getRoomOnlineUsers: (chatRoomId) => get().onlineUsersByRoom[normalizeRoomId(chatRoomId)] || [],
 
-  getRoomTypingUsers: (chatRoomId) => get().typingUsersByRoom[chatRoomId] || [],
+  getRoomTypingUsers: (chatRoomId) => get().typingUsersByRoom[normalizeRoomId(chatRoomId)] || [],
 
   initSocketListeners: () => {
     if (get().socketListenersReady) return;
 
     socketService.on('new_message', (data) => {
-      const roomId = data.chatRoomId || data.message?.chatRoomId;
+      const roomId = normalizeRoomId(data.chatRoomId || data.message?.chatRoomId);
       if (!roomId || !data.message) return;
       get().receiveMessage(data.message, roomId);
     });
 
     socketService.on('message_sent', (data) => {
-      const roomId = data.chatRoomId || data.message?.chatRoomId;
+      const roomId = normalizeRoomId(data.chatRoomId || data.message?.chatRoomId);
       if (!roomId) return;
       get().confirmMessageSent(
         data.localId,
@@ -112,26 +122,44 @@ export const useChatStore = create((set, get) => ({
     });
 
     socketService.on('room_presence', (data) => {
-      if (data.chatRoomId && Array.isArray(data.onlineUserIds)) {
-        get().setRoomPresence(data.chatRoomId, data.onlineUserIds);
+      const roomId = normalizeRoomId(data.chatRoomId);
+      if (roomId && Array.isArray(data.onlineUserIds)) {
+        get().setRoomPresence(roomId, data.onlineUserIds);
       }
     });
 
     socketService.on('user_online', (data) => {
-      if (data.chatRoomId && data.userId) {
-        get().markUserOnline(data.chatRoomId, String(data.userId));
+      const roomId = normalizeRoomId(data.chatRoomId);
+      if (roomId && data.userId) {
+        get().markUserOnline(roomId, String(data.userId));
       }
     });
 
     socketService.on('user_offline', (data) => {
-      if (data.chatRoomId && data.userId) {
-        get().markUserOffline(data.chatRoomId, String(data.userId));
+      const roomId = normalizeRoomId(data.chatRoomId);
+      if (roomId && data.userId) {
+        get().markUserOffline(roomId, String(data.userId));
       }
+    });
+
+    socketService.on('user_typing', (data) => {
+      const roomId = normalizeRoomId(data.chatRoomId);
+      if (!roomId || !data.userId) return;
+      const me = getUserId(useAuthStore.getState().user);
+      if (me && String(data.userId) === String(me)) return;
+      get().setTypingUser(roomId, String(data.userId), data.name);
+    });
+
+    socketService.on('user_stopped_typing', (data) => {
+      const roomId = normalizeRoomId(data.chatRoomId);
+      if (!roomId || !data.userId) return;
+      get().removeTypingUser(roomId, String(data.userId));
     });
 
     socketService.on('connection_status', (data) => {
       get().setConnected(data.connected);
       if (data.connected) {
+        socketService.joinCurrentRoom();
         get().syncOfflineMessages();
       }
     });
@@ -140,54 +168,85 @@ export const useChatStore = create((set, get) => ({
   },
 
   setRoomPresence: (chatRoomId, onlineUserIds) => {
+    const roomId = normalizeRoomId(chatRoomId);
+    if (!roomId) return;
+
     set((state) => ({
       onlineUsersByRoom: {
         ...state.onlineUsersByRoom,
-        [chatRoomId]: onlineUserIds.map(String),
+        [roomId]: onlineUserIds.map(String),
       },
     }));
   },
 
   markUserOnline: (chatRoomId, userId) => {
+    const roomId = normalizeRoomId(chatRoomId);
+    if (!roomId) return;
+
     set((state) => {
-      const current = state.onlineUsersByRoom[chatRoomId] || [];
+      const current = state.onlineUsersByRoom[roomId] || [];
       const id = String(userId);
       if (current.includes(id)) return state;
       return {
         onlineUsersByRoom: {
           ...state.onlineUsersByRoom,
-          [chatRoomId]: [...current, id],
+          [roomId]: [...current, id],
         },
       };
     });
   },
 
   markUserOffline: (chatRoomId, userId) => {
+    const roomId = normalizeRoomId(chatRoomId);
+    if (!roomId) return;
+
     set((state) => {
       const id = String(userId);
-      const current = state.onlineUsersByRoom[chatRoomId] || [];
+      const current = state.onlineUsersByRoom[roomId] || [];
       return {
         onlineUsersByRoom: {
           ...state.onlineUsersByRoom,
-          [chatRoomId]: current.filter((uid) => uid !== id),
+          [roomId]: current.filter((uid) => uid !== id),
         },
       };
     });
   },
 
   loadMessages: async (chatRoomId, page = 1) => {
+    const roomId = normalizeRoomId(chatRoomId);
+    if (!roomId) return false;
+
     try {
-      const response = await api.get(`/chat/${chatRoomId}/messages?page=${page}`);
+      const response = await api.get(`/chat/${roomId}/messages?page=${page}`);
       const newMessages = response.data.data.messages.map(normalizeMessageSender).map((message) =>
-        enrichMessageMedia(message, chatRoomId)
+        enrichMessageMedia(message, roomId)
       );
 
       set((state) => {
         if (page === 1) {
-          return updateRoomMessages(state, chatRoomId, () => newMessages);
+          return updateRoomMessages(state, roomId, (current) => {
+            const pendingLocal = current.filter((message) => message.isLocal);
+            const merged = [...newMessages];
+
+            pendingLocal.forEach((localMessage) => {
+              const alreadySaved = merged.some(
+                (message) =>
+                  (localMessage.localId &&
+                    (message.localId === localMessage.localId ||
+                      String(message._id) === String(localMessage.localId))) ||
+                  String(message._id) === String(localMessage._id)
+              );
+
+              if (!alreadySaved) {
+                merged.push(localMessage);
+              }
+            });
+
+            return merged;
+          });
         }
 
-        return updateRoomMessages(state, chatRoomId, (current) => [...newMessages, ...current]);
+        return updateRoomMessages(state, roomId, (current) => [...newMessages, ...current]);
       });
 
       return response.data.data.hasMore;
@@ -198,6 +257,9 @@ export const useChatStore = create((set, get) => ({
   },
 
   sendMessage: (chatRoomId, content, messageType = 'text', metadata = null) => {
+    const roomId = normalizeRoomId(chatRoomId);
+    if (!roomId) return null;
+
     const localId = `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const sender = buildSenderSnapshot(useAuthStore.getState().user);
 
@@ -205,7 +267,7 @@ export const useChatStore = create((set, get) => ({
       {
         _id: localId,
         localId,
-        chatRoomId,
+        chatRoomId: roomId,
         sender,
         content,
         messageType,
@@ -214,14 +276,14 @@ export const useChatStore = create((set, get) => ({
         createdAt: new Date().toISOString(),
         isLocal: true,
       },
-      chatRoomId
+      roomId
     );
 
-    set((state) => updateRoomMessages(state, chatRoomId, (current) => [...current, localMessage]));
+    set((state) => updateRoomMessages(state, roomId, (current) => [...current, localMessage]));
 
     const sent = socketService.sendMessage({
       localId,
-      chatRoomId,
+      chatRoomId: roomId,
       content,
       messageType,
       metadata: sanitizeOutgoingMetadata(metadata),
@@ -256,7 +318,7 @@ export const useChatStore = create((set, get) => ({
   },
 
   receiveMessage: (message, chatRoomId) => {
-    const roomId = chatRoomId || message.chatRoomId;
+    const roomId = normalizeRoomId(chatRoomId || message.chatRoomId);
     if (!roomId) return;
 
     const normalizedMessage = enrichMessageMedia(
@@ -292,7 +354,7 @@ export const useChatStore = create((set, get) => ({
   },
 
   confirmMessageSent: (localId, messageId, timestamp, sender, serverMessage, chatRoomId) => {
-    const roomId = chatRoomId || serverMessage?.chatRoomId;
+    const roomId = normalizeRoomId(chatRoomId || serverMessage?.chatRoomId);
     if (!roomId) return;
 
     set((state) =>
@@ -351,34 +413,48 @@ export const useChatStore = create((set, get) => ({
   },
 
   setTypingUser: (chatRoomId, userId, name) => {
-    if (!chatRoomId) return;
+    const roomId = normalizeRoomId(chatRoomId);
+    if (!roomId) return;
+
+    const id = String(userId);
+    const timerKey = `${roomId}:${id}`;
+
+    if (typingClearTimers.has(timerKey)) {
+      clearTimeout(typingClearTimers.get(timerKey));
+    }
 
     set((state) => {
-      const current = state.typingUsersByRoom[chatRoomId] || [];
-      const exists = current.find((u) => u.userId === userId);
-      if (exists) return state;
+      const current = state.typingUsersByRoom[roomId] || [];
+      const withoutUser = current.filter((u) => String(u.userId) !== id);
 
       return {
         typingUsersByRoom: {
           ...state.typingUsersByRoom,
-          [chatRoomId]: [...current, { userId, name }],
+          [roomId]: [...withoutUser, { userId: id, name }],
         },
       };
     });
 
-    setTimeout(() => {
-      get().removeTypingUser(chatRoomId, userId);
-    }, 3000);
+    typingClearTimers.set(
+      timerKey,
+      setTimeout(() => {
+        get().removeTypingUser(roomId, id);
+        typingClearTimers.delete(timerKey);
+      }, 3500)
+    );
   },
 
   removeTypingUser: (chatRoomId, userId) => {
-    if (!chatRoomId) return;
+    const roomId = normalizeRoomId(chatRoomId);
+    if (!roomId) return;
+
+    const id = String(userId);
 
     set((state) => ({
       typingUsersByRoom: {
         ...state.typingUsersByRoom,
-        [chatRoomId]: (state.typingUsersByRoom[chatRoomId] || []).filter(
-          (u) => u.userId !== userId
+        [roomId]: (state.typingUsersByRoom[roomId] || []).filter(
+          (u) => String(u.userId) !== id
         ),
       },
     }));
@@ -517,9 +593,12 @@ export const useChatStore = create((set, get) => ({
   setConnected: (status) => set({ isConnected: status }),
 
   clearRoomState: (chatRoomId) => {
+    const roomId = normalizeRoomId(chatRoomId);
+    if (!roomId) return;
+
     set((state) => {
       const typingUsersByRoom = { ...state.typingUsersByRoom };
-      delete typingUsersByRoom[chatRoomId];
+      delete typingUsersByRoom[roomId];
       return { typingUsersByRoom };
     });
   },

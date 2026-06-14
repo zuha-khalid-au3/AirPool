@@ -5,6 +5,8 @@ import VoiceNotePlayer from './VoiceNotePlayer';
 import AuthenticatedImage from './AuthenticatedImage';
 import { downloadAuthenticatedMediaFile, parseObjectNameFromMediaUrl } from '../../utils/chatMedia';
 
+import { colors } from '../../theme/colors';
+
 export default function MessageBubble({
   message,
   chatRoomId,
@@ -156,13 +158,13 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   bubbleOwn: {
-    backgroundColor: '#0284C7',
+    backgroundColor: colors.chatOwn,
     borderBottomRightRadius: 4,
   },
   bubbleOther: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.chatOther,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: colors.secondaryBorder,
     borderBottomLeftRadius: 4,
   },
   bodyText: {

@@ -26,13 +26,15 @@ import ChatComposer from '../../components/chat/ChatComposer';
 import IncomingCallBanner from '../../components/chat/IncomingCallBanner';
 import Avatar from '../../components/ui/Avatar';
 import { getUserId, idsMatch } from '../../utils/user';
+import { colors } from '../../theme/colors';
 
 const EMPTY_MESSAGES = [];
 const EMPTY_ONLINE = [];
 const EMPTY_TYPING = [];
 
 export default function GroupChatScreen({ navigation, route }) {
-  const { chatRoomId, poolId } = route.params;
+  const { chatRoomId: routeChatRoomId, poolId } = route.params;
+  const chatRoomId = String(routeChatRoomId);
   const { user } = useAuthStore();
   const userId = getUserId(user);
   const insets = useSafeAreaInsets();
@@ -42,7 +44,7 @@ export default function GroupChatScreen({ navigation, route }) {
   } = useCallStore();
 
   const messages = useChatStore(
-    (state) => state.messagesByRoom[chatRoomId] || EMPTY_MESSAGES
+    (state) => state.messagesByRoom[chatRoomId] ?? EMPTY_MESSAGES
   );
   const onlineUserIds = useChatStore(
     (state) => state.onlineUsersByRoom[chatRoomId] ?? EMPTY_ONLINE
@@ -55,8 +57,6 @@ export default function GroupChatScreen({ navigation, route }) {
   const loadMessages = useChatStore((state) => state.loadMessages);
   const sendMessage = useChatStore((state) => state.sendMessage);
   const sendMediaMessage = useChatStore((state) => state.sendMediaMessage);
-  const setTypingUser = useChatStore((state) => state.setTypingUser);
-  const removeTypingUser = useChatStore((state) => state.removeTypingUser);
   const clearRoomState = useChatStore((state) => state.clearRoomState);
   const shareLiveLocation = useChatStore((state) => state.shareLiveLocation);
   const stopActiveLiveSession = useChatStore((state) => state.stopActiveLiveSession);
@@ -71,7 +71,10 @@ export default function GroupChatScreen({ navigation, route }) {
   const [previewImage, setPreviewImage] = useState(null);
   const flatListRef = useRef(null);
   const typingTimeout = useRef(null);
-  const lastScrolledKeyRef = useRef('');
+  const prevMessageCountRef = useRef(0);
+  const pendingScrollRef = useRef(false);
+
+  const displayMessages = useMemo(() => [...messages].reverse(), [messages]);
 
   const otherMembers =
     currentPool?.members?.filter(
@@ -84,91 +87,73 @@ export default function GroupChatScreen({ navigation, route }) {
     if (poolId) getPoolDetails(poolId);
   }, [poolId]);
 
-  const scrollToLatest = useCallback((animated = true) => {
+  const scrollToLatest = useCallback((animated = false) => {
+    if (!displayMessages.length) return;
     requestAnimationFrame(() => {
-      flatListRef.current?.scrollToEnd({ animated });
+      flatListRef.current?.scrollToOffset({ offset: 0, animated });
     });
-  }, []);
-
-  const lastMessageKey = messages.length
-    ? String(messages[messages.length - 1]._id || messages[messages.length - 1].localId)
-    : 'empty';
+  }, [displayMessages.length]);
 
   useEffect(() => {
-    if (messages.length === 0 || lastMessageKey === lastScrolledKeyRef.current) {
+    const count = displayMessages.length;
+    if (count === 0) {
+      prevMessageCountRef.current = 0;
       return;
     }
-    lastScrolledKeyRef.current = lastMessageKey;
-    scrollToLatest(false);
-  }, [lastMessageKey, messages.length, scrollToLatest]);
+
+    if (pendingScrollRef.current || count > prevMessageCountRef.current) {
+      scrollToLatest(prevMessageCountRef.current > 0);
+      pendingScrollRef.current = false;
+    }
+
+    prevMessageCountRef.current = count;
+  }, [displayMessages.length, scrollToLatest]);
 
   useEffect(() => {
     const eventName = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const sub = Keyboard.addListener(eventName, () => {
-      scrollToLatest(true);
-    });
+    const sub = Keyboard.addListener(eventName, () => scrollToLatest(true));
     return () => sub.remove();
   }, [scrollToLatest]);
 
   useFocusEffect(
     useCallback(() => {
       let active = true;
+      pendingScrollRef.current = true;
+      prevMessageCountRef.current = 0;
 
-      const joinChat = async () => {
-        await socketService.connect();
-        if (!active) return;
+      socketService.joinRoom(chatRoomId);
+      socketService.connect().catch(() => {});
 
-        socketService.joinRoom(chatRoomId);
-
-        const existing = useChatStore.getState().messagesByRoom[chatRoomId];
-        if (!existing?.length) {
-          await loadMessages(chatRoomId);
-        }
-
-        scrollToLatest(false);
-      };
-
-      joinChat();
+      loadMessages(chatRoomId).finally(() => {
+        if (active) pendingScrollRef.current = true;
+      });
 
       return () => {
         active = false;
         socketService.leaveRoom(chatRoomId);
         clearRoomState(chatRoomId);
       };
-    }, [chatRoomId, loadMessages, scrollToLatest, clearRoomState])
+    }, [chatRoomId, loadMessages, clearRoomState])
   );
 
   useEffect(() => {
-    let isActive = true;
-
-    const handleUserTyping = (data) => {
-      if (data.chatRoomId !== chatRoomId) return;
-      if (idsMatch(data.userId, userId)) return;
-      setTypingUser(chatRoomId, data.userId, data.name);
-    };
-
-    const handleUserStoppedTyping = (data) => {
-      if (data.chatRoomId !== chatRoomId) return;
-      removeTypingUser(chatRoomId, data.userId);
-    };
-
     const handleLiveUpdate = (data) => updateLiveLocation(data.liveSessionId, data);
     const handleLiveStop = (data) => markLiveLocationStopped(data.liveSessionId);
 
     const handleCallInvite = (data) => {
-      if (data.chatRoomId === chatRoomId) setIncomingCall(data);
+      if (String(data.chatRoomId) === chatRoomId) setIncomingCall(data);
     };
     const handleCallRinging = (data) => {
-      if (data.chatRoomId === chatRoomId) {
+      if (String(data.chatRoomId) === chatRoomId) {
         setOutgoingCall({ ...data, chatRoomId });
       }
     };
     const handleCallAccepted = (data) => {
-      if (data.chatRoomId !== chatRoomId) return;
+      if (String(data.chatRoomId) !== chatRoomId) return;
       setActiveCall(data);
     };
     const handleCallConnected = (data) => {
-      if (data.chatRoomId !== chatRoomId) return;
+      if (String(data.chatRoomId) !== chatRoomId) return;
       setActiveCall(data);
     };
     const handleCallRejected = () => {
@@ -181,8 +166,6 @@ export default function GroupChatScreen({ navigation, route }) {
     };
     const handleCallEnded = () => clearCall();
 
-    socketService.on('user_typing', handleUserTyping);
-    socketService.on('user_stopped_typing', handleUserStoppedTyping);
     socketService.on('live_location_update', handleLiveUpdate);
     socketService.on('live_location_stop', handleLiveStop);
     socketService.on('call_invite', handleCallInvite);
@@ -194,9 +177,6 @@ export default function GroupChatScreen({ navigation, route }) {
     socketService.on('call_ended', handleCallEnded);
 
     return () => {
-      isActive = false;
-      socketService.off('user_typing', handleUserTyping);
-      socketService.off('user_stopped_typing', handleUserStoppedTyping);
       socketService.off('live_location_update', handleLiveUpdate);
       socketService.off('live_location_stop', handleLiveStop);
       socketService.off('call_invite', handleCallInvite);
@@ -219,8 +199,9 @@ export default function GroupChatScreen({ navigation, route }) {
     if (!inputText.trim()) return;
     sendMessage(chatRoomId, inputText.trim());
     setInputText('');
+    setIsTyping(false);
     socketService.stopTyping(chatRoomId);
-    scrollToLatest(true);
+    if (typingTimeout.current) clearTimeout(typingTimeout.current);
   };
 
   const handleShareLocation = async () => {
@@ -242,7 +223,6 @@ export default function GroupChatScreen({ navigation, route }) {
     setSendingMedia(true);
     try {
       await sendMediaMessage(chatRoomId, file);
-      scrollToLatest(true);
     } catch (error) {
       Alert.alert('Upload failed', error.response?.data?.error?.message || error.message);
     } finally {
@@ -345,11 +325,32 @@ export default function GroupChatScreen({ navigation, route }) {
   const totalMembers = otherMembers.length + 1;
   const onlineCount = onlineSet.size || (isConnected ? 1 : 0);
 
-  const subtitle = typingUsers.length
+  const typingLabel = typingUsers.length
     ? `${typingUsers.map((u) => u.name).join(', ')} typing…`
-    : sharingLocation
-      ? 'You are sharing live location'
-      : `${onlineCount} online · ${totalMembers} members`;
+    : null;
+
+  const subtitle = typingLabel
+    ? typingLabel
+    : !isConnected
+      ? 'Connecting…'
+      : sharingLocation
+        ? 'You are sharing live location'
+        : `${onlineCount} online · ${totalMembers} members`;
+
+  const renderTypingBar = () => {
+    if (!typingLabel) return null;
+
+    return (
+      <View style={styles.typingBar}>
+        <View style={styles.typingDots}>
+          <View style={[styles.typingDot, styles.typingDotDelay0]} />
+          <View style={[styles.typingDot, styles.typingDotDelay1]} />
+          <View style={[styles.typingDot, styles.typingDotDelay2]} />
+        </View>
+        <Text style={styles.typingText}>{typingLabel}</Text>
+      </View>
+    );
+  };
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -427,7 +428,8 @@ export default function GroupChatScreen({ navigation, route }) {
       >
         <FlatList
           ref={flatListRef}
-          data={messages}
+          inverted
+          data={displayMessages}
           renderItem={renderMessage}
           keyExtractor={(item, index) => {
             const id = item._id || item.localId;
@@ -435,13 +437,20 @@ export default function GroupChatScreen({ navigation, route }) {
           }}
           style={styles.messageList}
           contentContainerStyle={
-            messages.length === 0
+            displayMessages.length === 0
               ? styles.messageListContentEmpty
               : styles.messageListContent
           }
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="interactive"
-          extraData={lastMessageKey}
+          ListHeaderComponent={renderTypingBar}
+          extraData={`${displayMessages.length}-${typingUsers.length}-${typingLabel || ''}`}
+          onLayout={() => {
+            if (pendingScrollRef.current && displayMessages.length > 0) {
+              scrollToLatest(false);
+              pendingScrollRef.current = false;
+            }
+          }}
           ListEmptyComponent={
             <View style={styles.emptyState}>
               <Text style={styles.emptyEmoji}>💬</Text>
@@ -489,7 +498,7 @@ export default function GroupChatScreen({ navigation, route }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F8FAFC',
+    backgroundColor: colors.chatBg,
   },
   chatBody: {
     flex: 1,
@@ -607,5 +616,39 @@ const styles = StyleSheet.create({
   previewImage: {
     width: '100%',
     height: '70%',
+  },
+  typingBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+    paddingVertical: 8,
+    marginBottom: 4,
+  },
+  typingDots: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  typingDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#0284C7',
+    marginHorizontal: 2,
+    opacity: 0.4,
+  },
+  typingDotDelay0: {
+    opacity: 1,
+  },
+  typingDotDelay1: {
+    opacity: 0.7,
+  },
+  typingDotDelay2: {
+    opacity: 0.5,
+  },
+  typingText: {
+    color: '#64748B',
+    fontSize: 13,
+    fontStyle: 'italic',
   },
 });

@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Audio } from 'expo-av';
+import { colors } from '../../theme/colors';
 
 export default function ChatComposer({
   inputText,
@@ -230,8 +231,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 12,
     borderTopWidth: 1,
-    borderTopColor: '#F1F5F9',
-    backgroundColor: '#FFFFFF',
+    borderTopColor: colors.secondaryBorder,
+    backgroundColor: colors.secondaryCard,
   },
   recordingBanner: {
     flexDirection: 'row',
@@ -324,7 +325,7 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   sendActive: {
-    backgroundColor: '#0284C7',
+    backgroundColor: colors.primary,
   },
   sendDisabled: {
     backgroundColor: '#E2E8F0',

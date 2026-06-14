@@ -6,6 +6,48 @@ const { resolveMessageMedia } = require('../controllers/chat.controller');
 const logger = require('../utils/logger');
 
 const activeCalls = new Map();
+const roomPresence = new Map();
+
+function normalizeRoomId(chatRoomId) {
+  if (chatRoomId == null || chatRoomId === '') return '';
+  return String(chatRoomId);
+}
+
+function addUserToRoomPresence(chatRoomId, userId) {
+  const roomId = normalizeRoomId(chatRoomId);
+  const userKey = String(userId);
+  if (!roomId || !userKey) return [];
+
+  if (!roomPresence.has(roomId)) {
+    roomPresence.set(roomId, new Set());
+  }
+
+  roomPresence.get(roomId).add(userKey);
+  return [...roomPresence.get(roomId)];
+}
+
+function removeUserFromRoomPresence(chatRoomId, userId) {
+  const roomId = normalizeRoomId(chatRoomId);
+  const userKey = String(userId);
+  if (!roomId || !userKey) return [];
+
+  const users = roomPresence.get(roomId);
+  if (!users) return [];
+
+  users.delete(userKey);
+  if (users.size === 0) {
+    roomPresence.delete(roomId);
+    return [];
+  }
+
+  return [...users];
+}
+
+function getRoomPresence(chatRoomId) {
+  const roomId = normalizeRoomId(chatRoomId);
+  if (!roomId || !roomPresence.has(roomId)) return [];
+  return [...roomPresence.get(roomId)];
+}
 
 function serializeChatMessage(message, senderUser) {
   const messageObj = message.toObject({ virtuals: true });
@@ -93,17 +135,14 @@ const setupSocketHandlers = (io, redisClient) => {
     redisClient.hSet('online_users', socket.userId, socket.id);
 
     // Join a chat room (pool)
-    socket.on('join_room', async (data) => {
-      const { chatRoomId } = data;
+    socket.on('join_room', (data) => {
+      const chatRoomId = normalizeRoomId(data?.chatRoomId);
       if (!chatRoomId) return;
 
       socket.join(chatRoomId);
       logger.info(`User ${socket.userId} joined room ${chatRoomId}`);
 
-      const roomSockets = await io.in(chatRoomId).fetchSockets();
-      const onlineUserIds = [
-        ...new Set(roomSockets.map((s) => String(s.userId)).filter(Boolean)),
-      ];
+      const onlineUserIds = addUserToRoomPresence(chatRoomId, socket.userId);
 
       socket.emit('room_presence', {
         chatRoomId,
@@ -121,10 +160,11 @@ const setupSocketHandlers = (io, redisClient) => {
 
     // Leave a chat room
     socket.on('leave_room', (data) => {
-      const { chatRoomId } = data;
+      const chatRoomId = normalizeRoomId(data?.chatRoomId);
       if (!chatRoomId) return;
 
       socket.leave(chatRoomId);
+      removeUserFromRoomPresence(chatRoomId, socket.userId);
 
       socket.to(chatRoomId).emit('user_offline', {
         chatRoomId,
@@ -137,7 +177,9 @@ const setupSocketHandlers = (io, redisClient) => {
     // Send a message
     socket.on('send_message', async (data) => {
       try {
-        const { chatRoomId, content, messageType = 'text', metadata } = data;
+        const chatRoomId = normalizeRoomId(data?.chatRoomId);
+        const { content, messageType = 'text', metadata } = data;
+        if (!chatRoomId) return;
 
         const message = await Message.create({
           chatRoomId,
@@ -152,14 +194,15 @@ const setupSocketHandlers = (io, redisClient) => {
 
         const resolved = await resolveMessageMedia(message);
         const serializedMessage = serializeChatMessage(resolved, socket.user);
+        serializedMessage.chatRoomId = chatRoomId;
 
-        // Broadcast to other members in the room (sender gets message_sent)
-        socket.to(chatRoomId).emit('new_message', {
+        const payload = {
           chatRoomId,
           message: serializedMessage,
-        });
+        };
 
-        // Acknowledge to sender with full resolved message (includes media URLs)
+        socket.to(chatRoomId).emit('new_message', payload);
+
         socket.emit('message_sent', {
           chatRoomId,
           localId: data.localId,
@@ -178,16 +221,22 @@ const setupSocketHandlers = (io, redisClient) => {
 
     // Typing indicator
     socket.on('typing_start', (data) => {
-      socket.to(data.chatRoomId).emit('user_typing', {
-        chatRoomId: data.chatRoomId,
+      const chatRoomId = normalizeRoomId(data?.chatRoomId);
+      if (!chatRoomId) return;
+
+      socket.to(chatRoomId).emit('user_typing', {
+        chatRoomId,
         userId: socket.userId,
         name: socket.user.name,
       });
     });
 
     socket.on('typing_stop', (data) => {
-      socket.to(data.chatRoomId).emit('user_stopped_typing', {
-        chatRoomId: data.chatRoomId,
+      const chatRoomId = normalizeRoomId(data?.chatRoomId);
+      if (!chatRoomId) return;
+
+      socket.to(chatRoomId).emit('user_stopped_typing', {
+        chatRoomId,
         userId: socket.userId,
       });
     });
@@ -392,8 +441,9 @@ const setupSocketHandlers = (io, redisClient) => {
 
       const rooms = [...socket.rooms].filter((room) => room !== socket.id);
       rooms.forEach((chatRoomId) => {
+        removeUserFromRoomPresence(chatRoomId, socket.userId);
         socket.to(chatRoomId).emit('user_offline', {
-          chatRoomId,
+          chatRoomId: normalizeRoomId(chatRoomId),
           userId: socket.userId,
           name: socket.user.name,
           timestamp: new Date(),

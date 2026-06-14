@@ -1,5 +1,14 @@
 import { create } from 'zustand';
 import api from '../services/api';
+import { dedupePoolsById, getPoolId } from '../utils/pool';
+
+function upsertPool(pools, pool) {
+  const id = getPoolId(pool);
+  if (!id) return pools;
+
+  const without = pools.filter((item) => getPoolId(item) !== id);
+  return dedupePoolsById([pool, ...without]);
+}
 
 export const usePoolStore = create((set, get) => ({
   pools: [],
@@ -34,7 +43,7 @@ export const usePoolStore = create((set, get) => ({
       const response = await api.post('/pools', poolData);
       const newPool = response.data.data.pool;
       set((state) => ({
-        myPools: [newPool, ...state.myPools],
+        myPools: upsertPool(state.myPools, newPool),
         currentPool: newPool,
         isLoading: false,
       }));
@@ -52,9 +61,9 @@ export const usePoolStore = create((set, get) => ({
       const response = await api.post(`/pools/${poolId}/join`);
       const updatedPool = response.data.data.pool;
       set((state) => ({
-        myPools: [updatedPool, ...state.myPools],
+        myPools: upsertPool(state.myPools, updatedPool),
         currentPool: updatedPool,
-        pools: state.pools.filter((p) => p._id !== poolId),
+        pools: state.pools.filter((p) => getPoolId(p) !== getPoolId(updatedPool)),
         isLoading: false,
       }));
       return updatedPool;
@@ -69,7 +78,7 @@ export const usePoolStore = create((set, get) => ({
     try {
       await api.post(`/pools/${poolId}/leave`);
       set((state) => ({
-        myPools: state.myPools.filter((p) => p._id !== poolId),
+        myPools: state.myPools.filter((p) => getPoolId(p) !== String(poolId)),
         currentPool: null,
       }));
     } catch (error) {
@@ -93,7 +102,7 @@ export const usePoolStore = create((set, get) => ({
     set({ isLoading: true });
     try {
       const response = await api.get('/pools/user/my-pools');
-      set({ myPools: response.data.data.pools, isLoading: false });
+      set({ myPools: dedupePoolsById(response.data.data.pools), isLoading: false });
       return response.data.data.pools;
     } catch (error) {
       set({ isLoading: false });
@@ -107,7 +116,7 @@ export const usePoolStore = create((set, get) => ({
       const updatedPool = response.data.data.pool;
       set((state) => ({
         currentPool: updatedPool,
-        myPools: state.myPools.map((pool) => (pool._id === poolId ? updatedPool : pool)),
+        myPools: upsertPool(state.myPools, updatedPool),
       }));
       return updatedPool;
     } catch (error) {

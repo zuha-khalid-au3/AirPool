@@ -48,6 +48,11 @@ const TAB_BAR_STYLE = {
   paddingBottom: 8,
   paddingTop: 8,
   height: 65,
+  shadowColor: '#0F172A',
+  shadowOffset: { width: 0, height: -2 },
+  shadowOpacity: 0.05,
+  shadowRadius: 8,
+  elevation: 8,
 };
 
 const STACK_SCREEN_OPTIONS = {
