@@ -117,7 +117,7 @@ export default function GroupChatScreen({ navigation, route }) {
     }
 
     prevMessageCountRef.current = count;
-  }, [displayMessages.length, scrollToLatest]);
+  }, [displayMessages.length, messagesRevision, scrollToLatest]);
 
   useEffect(() => {
     const eventName = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
@@ -134,6 +134,7 @@ export default function GroupChatScreen({ navigation, route }) {
       const handleReconnect = (data) => {
         if (active && data?.connected) {
           socketService.joinRoom(chatRoomId);
+          socketService.rejoinActiveRooms();
         }
       };
 
@@ -146,8 +147,21 @@ export default function GroupChatScreen({ navigation, route }) {
         if (active) pendingScrollRef.current = true;
       });
 
+      const rejoinInterval = setInterval(() => {
+        if (!active) return;
+        socketService.joinRoom(chatRoomId);
+        socketService.rejoinActiveRooms();
+      }, 4000);
+
+      const syncInterval = setInterval(() => {
+        if (!active) return;
+        loadMessages(chatRoomId);
+      }, 5000);
+
       return () => {
         active = false;
+        clearInterval(rejoinInterval);
+        clearInterval(syncInterval);
         socketService.off('connection_status', handleReconnect);
         socketService.leaveRoom(chatRoomId);
         clearRoomState(chatRoomId);

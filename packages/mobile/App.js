@@ -37,6 +37,7 @@ export default function App() {
   useEffect(() => {
     if (!isAuthenticated) {
       socketService.disconnect();
+      socketService.setChatHandlers(null);
       useChatStore.setState({ socketListenersReady: false });
       return undefined;
     }

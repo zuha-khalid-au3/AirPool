@@ -203,6 +203,8 @@ const setupSocketHandlers = (io, redisClient) => {
 
         socket.to(chatRoomId).emit('new_message', payload);
 
+        logger.info(`Message ${message._id} broadcast to room ${chatRoomId}`);
+
         socket.emit('message_sent', {
           chatRoomId,
           localId: data.localId,

@@ -4,8 +4,6 @@ import { isNgrokUrl } from '../config/env.utils';
 import { SOCKET_URL } from '../config/env';
 
 const SERVER_EVENTS = [
-  'new_message',
-  'message_sent',
   'message_error',
   'user_typing',
   'user_stopped_typing',
@@ -36,9 +34,13 @@ class SocketService {
     this.socket = null;
     this.isConnected = false;
     this.listeners = new Map();
+    this.activeRooms = new Set();
     this.currentRoomId = null;
     this.connectPromise = null;
     this.serverEventsBound = false;
+    this.chatHandlers = null;
+    this._onNewMessage = null;
+    this._onMessageSent = null;
   }
 
   waitForConnection(timeoutMs = 10000) {
@@ -71,12 +73,49 @@ class SocketService {
     });
 
     this.serverEventsBound = true;
+    this._bindChatHandlers();
+  }
+
+  setChatHandlers(handlers) {
+    this.chatHandlers = handlers || null;
+    this._bindChatHandlers();
+  }
+
+  _bindChatHandlers() {
+    if (!this.socket) return;
+
+    if (this._onNewMessage) {
+      this.socket.off('new_message', this._onNewMessage);
+      this._onNewMessage = null;
+    }
+    if (this._onMessageSent) {
+      this.socket.off('message_sent', this._onMessageSent);
+      this._onMessageSent = null;
+    }
+
+    if (!this.chatHandlers) return;
+
+    this._onNewMessage = (data) => {
+      this.chatHandlers?.onNewMessage?.(data);
+    };
+    this._onMessageSent = (data) => {
+      this.chatHandlers?.onMessageSent?.(data);
+    };
+
+    this.socket.on('new_message', this._onNewMessage);
+    this.socket.on('message_sent', this._onMessageSent);
+  }
+
+  rejoinActiveRooms() {
+    if (!this.socket?.connected || this.activeRooms.size === 0) return;
+
+    this.activeRooms.forEach((roomId) => {
+      this.socket.emit('join_room', { chatRoomId: roomId });
+    });
   }
 
   joinCurrentRoom() {
-    if (this.socket?.connected && this.currentRoomId) {
-      this.socket.emit('join_room', { chatRoomId: this.currentRoomId });
-    }
+    this.rejoinActiveRooms();
   }
 
   async connect() {
@@ -110,6 +149,7 @@ class SocketService {
       if (this.socket) {
         this.socket.auth = { token: accessToken };
         this.socket.connect();
+        this._bindChatHandlers();
         return this.waitForConnection();
       }
 
@@ -133,14 +173,15 @@ class SocketService {
       this.bindServerEvents();
 
       this.socket.io.on('reconnect', () => {
-        this.joinCurrentRoom();
+        this.rejoinActiveRooms();
         this._notifyListeners('connection_status', { connected: true, reconnected: true });
       });
 
       this.socket.on('connect', () => {
         this.isConnected = true;
         console.log('Socket connected:', this.socket.id);
-        this.joinCurrentRoom();
+        this.rejoinActiveRooms();
+        this._bindChatHandlers();
         this._notifyListeners('connection_status', { connected: true });
       });
 
@@ -164,18 +205,32 @@ class SocketService {
 
   disconnect() {
     if (this.socket) {
+      if (this._onNewMessage) {
+        this.socket.off('new_message', this._onNewMessage);
+      }
+      if (this._onMessageSent) {
+        this.socket.off('message_sent', this._onMessageSent);
+      }
       this.socket.disconnect();
       this.socket = null;
       this.isConnected = false;
       this.currentRoomId = null;
+      this.activeRooms.clear();
       this.serverEventsBound = false;
+      this._onNewMessage = null;
+      this._onMessageSent = null;
     }
   }
 
   joinRoom(chatRoomId) {
-    this.currentRoomId = chatRoomId != null ? String(chatRoomId) : null;
+    const roomId = chatRoomId != null ? String(chatRoomId) : null;
+    if (!roomId) return;
+
+    this.activeRooms.add(roomId);
+    this.currentRoomId = roomId;
+
     if (this.socket?.connected) {
-      this.socket.emit('join_room', { chatRoomId: this.currentRoomId });
+      this.socket.emit('join_room', { chatRoomId: roomId });
       return;
     }
 
@@ -186,12 +241,17 @@ class SocketService {
 
   leaveRoom(chatRoomId) {
     const roomId = chatRoomId != null ? String(chatRoomId) : null;
-    if (this.socket?.connected && roomId) {
+    if (!roomId) return;
+
+    this.activeRooms.delete(roomId);
+
+    if (this.socket?.connected) {
       this.socket.emit('leave_room', { chatRoomId: roomId });
     }
 
     if (this.currentRoomId === roomId) {
-      this.currentRoomId = null;
+      const remaining = [...this.activeRooms];
+      this.currentRoomId = remaining.length ? remaining[remaining.length - 1] : null;
     }
   }
 

@@ -45,7 +45,8 @@ function dedupeMessagesById(messages) {
     const duplicateIndex = result.findIndex((existing) => {
       if (getMessageKey(existing) === id) return true;
       if (localId && existing.localId === localId) return true;
-      return isLikelySameMessage(existing, message);
+      if (localId && getMessageKey(existing) === localId) return true;
+      return false;
     });
 
     if (duplicateIndex === -1) {
@@ -203,25 +204,47 @@ export const useChatStore = create((set, get) => ({
   getRoomTypingUsers: (chatRoomId) => get().typingUsersByRoom[normalizeRoomId(chatRoomId)] || [],
 
   initSocketListeners: () => {
-    if (get().socketListenersReady) return;
+    if (get().socketListenersReady) {
+      socketService.setChatHandlers({
+        onNewMessage: (data) => {
+          const roomId = normalizeRoomId(data.chatRoomId || data.message?.chatRoomId);
+          if (!roomId || !data.message) return;
+          get().receiveMessage(data.message, roomId);
+        },
+        onMessageSent: (data) => {
+          const roomId = normalizeRoomId(data.chatRoomId || data.message?.chatRoomId);
+          if (!roomId) return;
+          get().confirmMessageSent(
+            data.localId,
+            data.messageId,
+            data.timestamp,
+            data.sender,
+            data.message,
+            roomId
+          );
+        },
+      });
+      return;
+    }
 
-    socketService.on('new_message', (data) => {
-      const roomId = normalizeRoomId(data.chatRoomId || data.message?.chatRoomId);
-      if (!roomId || !data.message) return;
-      get().receiveMessage(data.message, roomId);
-    });
-
-    socketService.on('message_sent', (data) => {
-      const roomId = normalizeRoomId(data.chatRoomId || data.message?.chatRoomId);
-      if (!roomId) return;
-      get().confirmMessageSent(
-        data.localId,
-        data.messageId,
-        data.timestamp,
-        data.sender,
-        data.message,
-        roomId
-      );
+    socketService.setChatHandlers({
+      onNewMessage: (data) => {
+        const roomId = normalizeRoomId(data.chatRoomId || data.message?.chatRoomId);
+        if (!roomId || !data.message) return;
+        get().receiveMessage(data.message, roomId);
+      },
+      onMessageSent: (data) => {
+        const roomId = normalizeRoomId(data.chatRoomId || data.message?.chatRoomId);
+        if (!roomId) return;
+        get().confirmMessageSent(
+          data.localId,
+          data.messageId,
+          data.timestamp,
+          data.sender,
+          data.message,
+          roomId
+        );
+      },
     });
 
     socketService.on('room_presence', (data) => {
@@ -262,7 +285,7 @@ export const useChatStore = create((set, get) => ({
     socketService.on('connection_status', (data) => {
       get().setConnected(data.connected);
       if (data.connected) {
-        socketService.joinCurrentRoom();
+        socketService.rejoinActiveRooms();
         get().syncOfflineMessages();
       }
     });
@@ -427,29 +450,45 @@ export const useChatStore = create((set, get) => ({
     set((state) =>
       updateRoomMessages(state, roomId, (current) => {
         const messageId = getMessageKey(normalizedMessage);
+        if (!messageId || messageId === 'undefined') {
+          return [...current, normalizedMessage];
+        }
+
         const incomingLocalId = normalizedMessage.localId
           ? String(normalizedMessage.localId)
           : '';
 
-        const withoutDuplicates = current.filter((existing) => {
-          if (messageId && getMessageKey(existing) === messageId) return false;
-          if (
-            incomingLocalId &&
-            (existing.localId === incomingLocalId || existing._id === incomingLocalId)
-          ) {
-            return false;
-          }
-          if (!existing.isLocal && isLikelySameMessage(existing, normalizedMessage)) {
-            return false;
-          }
-          return true;
+        const alreadyExists = current.some((existing) => {
+          if (getMessageKey(existing) === messageId) return true;
+          if (incomingLocalId && existing.localId === incomingLocalId) return true;
+          if (incomingLocalId && existing._id === incomingLocalId) return true;
+          return false;
         });
 
-        if (!messageId || messageId === 'undefined') {
-          return [...withoutDuplicates, normalizedMessage];
+        if (alreadyExists) {
+          return current.map((existing) => {
+            if (getMessageKey(existing) !== messageId && existing.localId !== incomingLocalId) {
+              return existing;
+            }
+
+            return {
+              ...normalizedMessage,
+              metadata: {
+                ...(normalizedMessage.metadata || {}),
+                ...(existing.metadata?.localUri ? { localUri: existing.metadata.localUri } : {}),
+              },
+            };
+          });
         }
 
-        return [...withoutDuplicates, normalizedMessage];
+        const withoutReplacedLocal = incomingLocalId
+          ? current.filter(
+              (existing) =>
+                existing.localId !== incomingLocalId && existing._id !== incomingLocalId
+            )
+          : current;
+
+        return [...withoutReplacedLocal, normalizedMessage];
       })
     );
   },
@@ -479,7 +518,6 @@ export const useChatStore = create((set, get) => ({
         const remaining = current.filter((message) => {
           if (message.localId === localId || message._id === localId) return false;
           if (getMessageKey(message) === serverId) return false;
-          if (isLikelySameMessage(message, confirmed)) return false;
           return true;
         });
 
