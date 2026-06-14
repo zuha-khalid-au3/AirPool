@@ -5,6 +5,7 @@ import {
   TouchableOpacity,
   FlatList,
   KeyboardAvoidingView,
+  Keyboard,
   Platform,
   Alert,
   Modal,
@@ -27,6 +28,8 @@ import Avatar from '../../components/ui/Avatar';
 import { getUserId, idsMatch } from '../../utils/user';
 
 const EMPTY_MESSAGES = [];
+const EMPTY_ONLINE = [];
+const EMPTY_TYPING = [];
 
 export default function GroupChatScreen({ navigation, route }) {
   const { chatRoomId, poolId } = route.params;
@@ -42,10 +45,10 @@ export default function GroupChatScreen({ navigation, route }) {
     (state) => state.messagesByRoom[chatRoomId] || EMPTY_MESSAGES
   );
   const onlineUserIds = useChatStore(
-    (state) => state.onlineUsersByRoom[chatRoomId] || []
+    (state) => state.onlineUsersByRoom[chatRoomId] ?? EMPTY_ONLINE
   );
   const typingUsers = useChatStore(
-    (state) => state.typingUsersByRoom[chatRoomId] || []
+    (state) => state.typingUsersByRoom[chatRoomId] ?? EMPTY_TYPING
   );
   const isConnected = useChatStore((state) => state.isConnected);
 
@@ -68,8 +71,7 @@ export default function GroupChatScreen({ navigation, route }) {
   const [previewImage, setPreviewImage] = useState(null);
   const flatListRef = useRef(null);
   const typingTimeout = useRef(null);
-
-  const headerHeight = insets.top + 56;
+  const lastScrolledKeyRef = useRef('');
 
   const otherMembers =
     currentPool?.members?.filter(
@@ -93,10 +95,20 @@ export default function GroupChatScreen({ navigation, route }) {
     : 'empty';
 
   useEffect(() => {
-    if (messages.length > 0) {
-      scrollToLatest(false);
+    if (messages.length === 0 || lastMessageKey === lastScrolledKeyRef.current) {
+      return;
     }
-  }, [lastMessageKey, scrollToLatest]);
+    lastScrolledKeyRef.current = lastMessageKey;
+    scrollToLatest(false);
+  }, [lastMessageKey, messages.length, scrollToLatest]);
+
+  useEffect(() => {
+    const eventName = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const sub = Keyboard.addListener(eventName, () => {
+      scrollToLatest(true);
+    });
+    return () => sub.remove();
+  }, [scrollToLatest]);
 
   useFocusEffect(
     useCallback(() => {
@@ -410,8 +422,8 @@ export default function GroupChatScreen({ navigation, route }) {
 
       <KeyboardAvoidingView
         style={styles.chatBody}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? headerHeight : 0}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={0}
       >
         <FlatList
           ref={flatListRef}
@@ -422,14 +434,13 @@ export default function GroupChatScreen({ navigation, route }) {
             return id ? String(id) : `message-${index}`;
           }}
           style={styles.messageList}
-          contentContainerStyle={[
-            styles.messageListContent,
-            messages.length === 0 && styles.messageListContentEmpty,
-          ]}
+          contentContainerStyle={
+            messages.length === 0
+              ? styles.messageListContentEmpty
+              : styles.messageListContent
+          }
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="interactive"
-          automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
-          onContentSizeChange={() => scrollToLatest(false)}
           extraData={lastMessageKey}
           ListEmptyComponent={
             <View style={styles.emptyState}>
@@ -451,7 +462,6 @@ export default function GroupChatScreen({ navigation, route }) {
           sharingLocation={sharingLocation}
           sendingMedia={sendingMedia}
           bottomInset={insets.bottom}
-          onInputFocus={() => scrollToLatest(true)}
         />
       </KeyboardAvoidingView>
 
@@ -547,10 +557,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 12,
     paddingBottom: 8,
-    flexGrow: 1,
   },
   messageListContentEmpty: {
+    flexGrow: 1,
     justifyContent: 'center',
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 8,
   },
   emptyState: {
     alignItems: 'center',
