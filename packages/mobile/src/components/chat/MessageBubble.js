@@ -1,9 +1,9 @@
 import React from 'react';
-import { View, Text, TouchableOpacity } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { format } from 'date-fns';
 import VoiceNotePlayer from './VoiceNotePlayer';
 import AuthenticatedImage from './AuthenticatedImage';
-import { fetchAuthenticatedImageDataUri, parseObjectNameFromMediaUrl } from '../../utils/chatMedia';
+import { downloadAuthenticatedMediaFile, parseObjectNameFromMediaUrl } from '../../utils/chatMedia';
 
 export default function MessageBubble({
   message,
@@ -19,36 +19,30 @@ export default function MessageBubble({
 
   if (isSystem) {
     return (
-      <View className="items-center my-2">
-        <View className="bg-secondary-100 rounded-full px-4 py-2">
-          <Text className="text-secondary-500 text-xs">{message.content}</Text>
+      <View style={styles.systemWrap}>
+        <View style={styles.systemBubble}>
+          <Text style={styles.systemText}>{message.content}</Text>
         </View>
       </View>
     );
   }
 
-  const bubbleClass = isOwnMessage
-    ? 'bg-primary rounded-br-md shadow-sm'
-    : 'bg-white border border-secondary-100 rounded-bl-md shadow-sm';
-
-  const textClass = isOwnMessage ? 'text-white' : 'text-secondary-900';
-  const metaClass = isOwnMessage ? 'text-primary-100' : 'text-secondary-500';
-  const timeClass = isOwnMessage ? 'text-primary-200' : 'text-secondary-400';
-
-  const imageStyle = { width: 224, height: 224, borderRadius: 12 };
+  const imageStyle = { width: 200, height: 200, borderRadius: 12 };
 
   const renderBody = () => {
     if (message.messageType === 'location') {
       const isLiveShare = meta.isLive !== false && !!meta.liveSessionId;
       return (
         <TouchableOpacity activeOpacity={0.85} onPress={() => onLocationPress?.(message)}>
-          <Text className={`text-2xl mb-1 ${textClass}`}>📍</Text>
-          <Text className={`text-base font-semibold ${textClass}`}>
+          <Text style={styles.locationEmoji}>📍</Text>
+          <Text style={[styles.bodyText, isOwnMessage ? styles.ownText : styles.otherText]}>
             {isLiveShare ? 'Live location' : 'Shared location'}
           </Text>
-          <Text className={`text-sm mt-1 ${metaClass}`}>Tap to track and get directions</Text>
+          <Text style={[styles.metaText, isOwnMessage ? styles.ownMeta : styles.otherMeta]}>
+            Tap to track and get directions
+          </Text>
           {isLiveShare && (
-            <Text className={`text-xs mt-2 ${isOwnMessage ? 'text-primary-200' : 'text-success'}`}>
+            <Text style={[styles.liveText, isOwnMessage ? styles.ownMeta : styles.liveOther]}>
               🟢 Live
             </Text>
           )}
@@ -63,12 +57,12 @@ export default function MessageBubble({
           activeOpacity={0.9}
           onPress={async () => {
             if (resolvedObjectName) {
-              const dataUri = await fetchAuthenticatedImageDataUri(
-                roomId,
-                resolvedObjectName,
-                meta.mimeType
-              );
-              onImagePress?.(message, dataUri);
+              try {
+                const localUri = await downloadAuthenticatedMediaFile(roomId, resolvedObjectName);
+                onImagePress?.(message, localUri);
+              } catch {
+                onImagePress?.(message, meta.imageUrl);
+              }
               return;
             }
             onImagePress?.(message, meta.imageUrl);
@@ -82,7 +76,9 @@ export default function MessageBubble({
             resizeMode="cover"
           />
           {message.content && message.content !== '📷 Photo' ? (
-            <Text className={`text-sm mt-2 ${metaClass}`}>{message.content}</Text>
+            <Text style={[styles.captionText, isOwnMessage ? styles.ownMeta : styles.otherMeta]}>
+              {message.content}
+            </Text>
           ) : null}
         </TouchableOpacity>
       );
@@ -100,27 +96,28 @@ export default function MessageBubble({
           localUri={meta.localUri}
           duration={meta.duration}
           isOwnMessage={isOwnMessage}
-          autoPlay={Boolean(isOwnMessage && meta.localUri)}
         />
       );
     }
 
-    return <Text className={`text-base leading-6 ${textClass}`}>{message.content}</Text>;
+    return (
+      <Text style={[styles.bodyText, isOwnMessage ? styles.ownText : styles.otherText]}>
+        {message.content}
+      </Text>
+    );
   };
 
   return (
-    <View className={`mb-3 ${isOwnMessage ? 'items-end' : 'items-start'}`}>
-      {!isOwnMessage && (
-        <Text className="text-secondary-400 text-xs mb-1 ml-1 font-medium">{senderName}</Text>
-      )}
-      <View className={`max-w-[82%] rounded-2xl px-4 py-3 ${bubbleClass}`}>
+    <View style={[styles.row, isOwnMessage ? styles.rowOwn : styles.rowOther]}>
+      {!isOwnMessage && <Text style={styles.senderName}>{senderName}</Text>}
+      <View style={[styles.bubble, isOwnMessage ? styles.bubbleOwn : styles.bubbleOther]}>
         {renderBody()}
-        <View className="flex-row justify-end items-center mt-1.5">
-          <Text className={`text-[11px] ${timeClass}`}>
+        <View style={styles.metaRow}>
+          <Text style={[styles.timeText, isOwnMessage ? styles.ownTime : styles.otherTime]}>
             {message.createdAt ? format(new Date(message.createdAt), 'HH:mm') : ''}
           </Text>
           {isOwnMessage && (
-            <Text className="text-primary-200 text-[11px] ml-1">
+            <Text style={styles.deliveryText}>
               {message.deliveryStatus === 'delivered'
                 ? '✓✓'
                 : message.deliveryStatus === 'sent'
@@ -133,3 +130,107 @@ export default function MessageBubble({
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  row: {
+    marginBottom: 12,
+  },
+  rowOwn: {
+    alignItems: 'flex-end',
+  },
+  rowOther: {
+    alignItems: 'flex-start',
+  },
+  senderName: {
+    color: '#94A3B8',
+    fontSize: 12,
+    marginBottom: 4,
+    marginLeft: 4,
+    fontWeight: '500',
+  },
+  bubble: {
+    maxWidth: '82%',
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  bubbleOwn: {
+    backgroundColor: '#0284C7',
+    borderBottomRightRadius: 4,
+  },
+  bubbleOther: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderBottomLeftRadius: 4,
+  },
+  bodyText: {
+    fontSize: 16,
+    lineHeight: 24,
+  },
+  ownText: {
+    color: '#FFFFFF',
+  },
+  otherText: {
+    color: '#0F172A',
+  },
+  metaText: {
+    fontSize: 14,
+    marginTop: 4,
+  },
+  ownMeta: {
+    color: '#E0F2FE',
+  },
+  otherMeta: {
+    color: '#64748B',
+  },
+  captionText: {
+    fontSize: 14,
+    marginTop: 8,
+  },
+  locationEmoji: {
+    fontSize: 24,
+    marginBottom: 4,
+  },
+  liveText: {
+    fontSize: 12,
+    marginTop: 8,
+  },
+  liveOther: {
+    color: '#10B981',
+  },
+  metaRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    marginTop: 6,
+  },
+  timeText: {
+    fontSize: 11,
+  },
+  ownTime: {
+    color: '#BAE6FD',
+  },
+  otherTime: {
+    color: '#94A3B8',
+  },
+  deliveryText: {
+    color: '#BAE6FD',
+    fontSize: 11,
+    marginLeft: 4,
+  },
+  systemWrap: {
+    alignItems: 'center',
+    marginVertical: 8,
+  },
+  systemBubble: {
+    backgroundColor: '#F1F5F9',
+    borderRadius: 999,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  systemText: {
+    color: '#64748B',
+    fontSize: 12,
+  },
+});

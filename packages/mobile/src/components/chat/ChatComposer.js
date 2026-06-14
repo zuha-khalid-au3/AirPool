@@ -8,6 +8,7 @@ import {
   Platform,
   Alert,
   ActivityIndicator,
+  StyleSheet,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Audio } from 'expo-av';
@@ -138,29 +139,31 @@ export default function ChatComposer({
   };
 
   return (
-    <View className="px-4 py-3 border-t border-secondary-100 bg-white">
+    <View style={styles.container}>
       {isRecording && (
-        <View className="flex-row items-center justify-center mb-3 bg-danger/10 rounded-xl py-2 px-4">
-          <View className="w-2 h-2 rounded-full bg-danger mr-2" />
-          <Text className="text-danger font-medium mr-2">Recording {recordingDuration}s</Text>
+        <View style={styles.recordingBanner}>
+          <View style={styles.recordingDot} />
+          <Text style={styles.recordingText}>Recording {recordingDuration}s</Text>
           <TouchableOpacity
             onPress={() => stopRecording(false)}
-            className="px-3 py-1 rounded-lg bg-secondary-200 mr-2"
+            style={styles.recordingCancel}
+            activeOpacity={0.8}
           >
-            <Text className="text-secondary-700 text-xs">Cancel</Text>
+            <Text style={styles.recordingCancelText}>Cancel</Text>
           </TouchableOpacity>
           <TouchableOpacity
             onPress={() => stopRecording(true)}
-            className="px-3 py-1 rounded-lg bg-primary"
+            style={styles.recordingSend}
+            activeOpacity={0.8}
           >
-            <Text className="text-white text-xs font-medium">Send</Text>
+            <Text style={styles.recordingSendText}>Send</Text>
           </TouchableOpacity>
         </View>
       )}
 
-      <View className="flex-row items-end">
+      <View style={styles.row}>
         <TouchableOpacity
-          className="w-10 h-10 rounded-full items-center justify-center bg-secondary-100 mr-1.5"
+          style={styles.iconButton}
           onPress={showAttachMenu}
           disabled={sendingMedia || isRecording}
           activeOpacity={0.8}
@@ -168,25 +171,21 @@ export default function ChatComposer({
           {sendingMedia ? (
             <ActivityIndicator size="small" color="#0284C7" />
           ) : (
-            <Text className="text-lg">📎</Text>
+            <Text style={styles.iconEmoji}>📎</Text>
           )}
         </TouchableOpacity>
 
         <TouchableOpacity
-          className={`w-10 h-10 rounded-full items-center justify-center mr-1.5 ${
-            sharingLocation ? 'bg-danger/15' : 'bg-success/10'
-          }`}
+          style={[styles.iconButton, sharingLocation ? styles.locationActive : styles.locationIdle]}
           onPress={onShareLocation}
           disabled={isRecording}
           activeOpacity={0.8}
         >
-          <Text className="text-base">{sharingLocation ? '⏹' : '📍'}</Text>
+          <Text style={styles.iconEmoji}>{sharingLocation ? '⏹' : '📍'}</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          className={`w-10 h-10 rounded-full items-center justify-center mr-2 ${
-            isRecording ? 'bg-danger' : 'bg-primary/10'
-          }`}
+          style={[styles.iconButton, isRecording ? styles.micRecording : styles.micIdle]}
           onPressIn={startRecording}
           onPressOut={() => {
             if (isRecording && recordingDuration >= 1) {
@@ -197,11 +196,11 @@ export default function ChatComposer({
           }}
           activeOpacity={0.8}
         >
-          <Text className="text-base">{isRecording ? '🔴' : '🎤'}</Text>
+          <Text style={styles.iconEmoji}>{isRecording ? '🔴' : '🎤'}</Text>
         </TouchableOpacity>
 
         <TextInput
-          className="flex-1 border border-secondary-200 rounded-2xl px-4 py-3 text-base max-h-24 bg-secondary-50"
+          style={styles.input}
           placeholder="Message..."
           placeholderTextColor="#94A3B8"
           multiline
@@ -211,16 +210,125 @@ export default function ChatComposer({
         />
 
         <TouchableOpacity
-          className={`w-11 h-11 rounded-full items-center justify-center ml-2 ${
-            inputText.trim() ? 'bg-primary shadow-md' : 'bg-secondary-200'
-          }`}
+          style={[styles.sendButton, inputText.trim() ? styles.sendActive : styles.sendDisabled]}
           onPress={onSend}
           disabled={!inputText.trim() || isRecording}
           activeOpacity={0.85}
         >
-          <Text className="text-white text-lg font-bold">↑</Text>
+          <Text style={styles.sendIcon}>↑</Text>
         </TouchableOpacity>
       </View>
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+    backgroundColor: '#FFFFFF',
+  },
+  recordingBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    borderRadius: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+  },
+  recordingDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#EF4444',
+    marginRight: 8,
+  },
+  recordingText: {
+    color: '#EF4444',
+    fontWeight: '500',
+    marginRight: 8,
+  },
+  recordingCancel: {
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 8,
+    backgroundColor: '#E2E8F0',
+    marginRight: 8,
+  },
+  recordingCancelText: {
+    color: '#334155',
+    fontSize: 12,
+  },
+  recordingSend: {
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 8,
+    backgroundColor: '#0284C7',
+  },
+  recordingSendText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+  },
+  iconButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 6,
+  },
+  iconEmoji: {
+    fontSize: 18,
+  },
+  locationIdle: {
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+  },
+  locationActive: {
+    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+  },
+  micIdle: {
+    backgroundColor: 'rgba(2, 132, 199, 0.1)',
+  },
+  micRecording: {
+    backgroundColor: '#EF4444',
+  },
+  input: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontSize: 16,
+    maxHeight: 96,
+    backgroundColor: '#F8FAFC',
+  },
+  sendButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
+  },
+  sendActive: {
+    backgroundColor: '#0284C7',
+  },
+  sendDisabled: {
+    backgroundColor: '#E2E8F0',
+  },
+  sendIcon: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+});

@@ -1,7 +1,9 @@
+import * as FileSystem from 'expo-file-system';
 import { API_BASE_URL } from '../config/env';
 import { isNgrokUrl } from '../config/env.utils';
-import api from '../services/api';
 import * as SecureStore from 'expo-secure-store';
+
+const MEDIA_CACHE_DIR = `${FileSystem.cacheDirectory}airpool-chat/`;
 
 async function getAccessToken() {
   try {
@@ -59,29 +61,47 @@ export async function getMediaAuthHeaders() {
   return headers;
 }
 
-function arrayBufferToBase64(buffer) {
-  const bytes = new Uint8Array(buffer);
-  const chunkSize = 0x8000;
-  let binary = '';
-
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
-  }
-
-  return globalThis.btoa(binary);
+function getMediaCachePath(objectName) {
+  const safeName = objectName.replace(/[^a-zA-Z0-9._-]/g, '_');
+  return `${MEDIA_CACHE_DIR}${safeName}`;
 }
 
-export async function fetchAuthenticatedImageDataUri(chatRoomId, objectName, fallbackMimeType = 'image/jpeg') {
+async function ensureMediaCacheDir() {
+  const info = await FileSystem.getInfoAsync(MEDIA_CACHE_DIR);
+  if (!info.exists) {
+    await FileSystem.makeDirectoryAsync(MEDIA_CACHE_DIR, { intermediates: true });
+  }
+}
+
+export async function downloadAuthenticatedMediaFile(chatRoomId, objectName) {
   if (!chatRoomId || !objectName) return null;
 
-  const response = await api.get(`/chat/${encodeURIComponent(chatRoomId)}/file`, {
-    params: { objectName },
-    responseType: 'arraybuffer',
-  });
+  await ensureMediaCacheDir();
 
-  const contentType = response.headers['content-type'] || fallbackMimeType;
-  const base64 = arrayBufferToBase64(response.data);
-  return `data:${contentType};base64,${base64}`;
+  const localUri = getMediaCachePath(objectName);
+  const cached = await FileSystem.getInfoAsync(localUri);
+  if (cached.exists && cached.size > 0) {
+    return localUri;
+  }
+
+  const token = await getAccessToken();
+  const url = buildChatMediaUrl(chatRoomId, objectName, token);
+  const headers = await getMediaAuthHeaders();
+
+  const result = await FileSystem.downloadAsync(url, localUri, { headers });
+  if (result.status !== 200) {
+    await FileSystem.deleteAsync(localUri, { idempotent: true }).catch(() => {});
+    throw new Error(`Media download failed (${result.status})`);
+  }
+
+  return localUri;
+}
+
+export function sanitizeOutgoingMetadata(metadata) {
+  if (!metadata) return null;
+
+  const { localUri, imageUrl, audioUrl, ...persisted } = metadata;
+  return Object.keys(persisted).length > 0 ? persisted : null;
 }
 
 export function enrichMessageMedia(message, chatRoomId) {
@@ -89,7 +109,6 @@ export function enrichMessageMedia(message, chatRoomId) {
     return message;
   }
 
-  // URLs are resolved async in UI components with access_token appended
   return message;
 }
 

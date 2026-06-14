@@ -22,6 +22,9 @@ router.post('/:poolId/join', poolController.joinPool);
 // Leave a pool
 router.post('/:poolId/leave', poolController.leavePool);
 
+// Remove a member from the pool (creator only)
+router.post('/:poolId/members/:userId/remove', poolController.removeMember);
+
 // Update pool status (creator only)
 router.patch('/:poolId/status', poolController.updatePoolStatus);
 

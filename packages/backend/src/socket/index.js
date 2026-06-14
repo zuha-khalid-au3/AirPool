@@ -28,6 +28,36 @@ function serializeSender(senderUser) {
   };
 }
 
+const ALLOWED_MESSAGE_METADATA_KEYS = [
+  'latitude',
+  'longitude',
+  'heading',
+  'accuracy',
+  'liveSessionId',
+  'isLive',
+  'objectName',
+  'mimeType',
+  'fileSize',
+  'width',
+  'height',
+  'duration',
+  'action',
+  'meetingPoint',
+];
+
+function sanitizeMessageMetadata(metadata) {
+  if (!metadata || typeof metadata !== 'object') return undefined;
+
+  const sanitized = {};
+  for (const key of ALLOWED_MESSAGE_METADATA_KEYS) {
+    if (metadata[key] !== undefined) {
+      sanitized[key] = metadata[key];
+    }
+  }
+
+  return Object.keys(sanitized).length > 0 ? sanitized : undefined;
+}
+
 const setupSocketHandlers = (io, redisClient) => {
   // Authentication middleware for Socket.io
   io.use(async (socket, next) => {
@@ -99,7 +129,7 @@ const setupSocketHandlers = (io, redisClient) => {
           sender: socket.userId,
           content: content || '',
           messageType,
-          metadata,
+          metadata: sanitizeMessageMetadata(metadata),
           deliveryStatus: 'delivered',
         });
 
@@ -108,8 +138,8 @@ const setupSocketHandlers = (io, redisClient) => {
         const resolved = await resolveMessageMedia(message);
         const serializedMessage = serializeChatMessage(resolved, socket.user);
 
-        // Broadcast to room
-        io.to(chatRoomId).emit('new_message', {
+        // Broadcast to other members in the room (sender gets message_sent)
+        socket.to(chatRoomId).emit('new_message', {
           message: serializedMessage,
         });
 
@@ -299,6 +329,41 @@ const setupSocketHandlers = (io, redisClient) => {
       }
       socket.emit('call_ended', payload);
       activeCalls.delete(callId);
+    });
+
+    async function relayCallWebRtcSignal(io, redisClient, callId, fromUserId, event, payload) {
+      const call = activeCalls.get(callId);
+      if (!call) return;
+
+      const otherUserId = call.callerId === fromUserId ? call.calleeId : call.callerId;
+      const otherSocketId = await redisClient.hGet('online_users', otherUserId);
+      if (otherSocketId) {
+        io.to(otherSocketId).emit(event, { callId, ...payload });
+      }
+    }
+
+    socket.on('call_webrtc_offer', async (data) => {
+      const { callId, offer } = data;
+      if (!callId || !offer) return;
+      await relayCallWebRtcSignal(io, redisClient, callId, socket.userId, 'call_webrtc_offer', {
+        offer,
+      });
+    });
+
+    socket.on('call_webrtc_answer', async (data) => {
+      const { callId, answer } = data;
+      if (!callId || !answer) return;
+      await relayCallWebRtcSignal(io, redisClient, callId, socket.userId, 'call_webrtc_answer', {
+        answer,
+      });
+    });
+
+    socket.on('call_webrtc_ice', async (data) => {
+      const { callId, candidate } = data;
+      if (!callId || !candidate) return;
+      await relayCallWebRtcSignal(io, redisClient, callId, socket.userId, 'call_webrtc_ice', {
+        candidate,
+      });
     });
 
     // Disconnect

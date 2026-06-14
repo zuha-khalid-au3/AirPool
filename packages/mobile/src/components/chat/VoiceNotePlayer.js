@@ -1,9 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
 import { Audio } from 'expo-av';
 import {
-  buildAuthenticatedChatMediaUrl,
-  getMediaAuthHeaders,
+  downloadAuthenticatedMediaFile,
   parseObjectNameFromMediaUrl,
 } from '../../utils/chatMedia';
 
@@ -21,11 +20,9 @@ export default function VoiceNotePlayer({
   objectName,
   duration,
   isOwnMessage,
-  autoPlay = false,
 }) {
   const soundRef = useRef(null);
-  const autoPlayedRef = useRef(false);
-  const [playbackUri, setPlaybackUri] = useState(localUri || uri || null);
+  const [playbackUri, setPlaybackUri] = useState(localUri || null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [hasError, setHasError] = useState(false);
@@ -42,11 +39,15 @@ export default function VoiceNotePlayer({
 
       const resolvedObjectName = objectName || parseObjectNameFromMediaUrl(uri);
       if (resolvedObjectName && chatRoomId) {
-        const authenticatedUrl = await buildAuthenticatedChatMediaUrl(
-          chatRoomId,
-          resolvedObjectName
-        );
-        if (!cancelled) setPlaybackUri(authenticatedUrl);
+        try {
+          const cachedUri = await downloadAuthenticatedMediaFile(chatRoomId, resolvedObjectName);
+          if (!cancelled) {
+            setPlaybackUri(cachedUri);
+            setHasError(false);
+          }
+        } catch {
+          if (!cancelled) setHasError(true);
+        }
         return;
       }
 
@@ -98,9 +99,8 @@ export default function VoiceNotePlayer({
       soundRef.current = null;
     }
 
-    const headers = localUri ? {} : await getMediaAuthHeaders();
     const { sound } = await Audio.Sound.createAsync(
-      { uri: playbackUri, headers },
+      { uri: playbackUri },
       { shouldPlay: false },
       onPlaybackStatusUpdate
     );
@@ -137,13 +137,6 @@ export default function VoiceNotePlayer({
     }
   };
 
-  useEffect(() => {
-    if (!autoPlay || autoPlayedRef.current || !playbackUri) return;
-
-    autoPlayedRef.current = true;
-    togglePlayback();
-  }, [autoPlay, playbackUri]);
-
   const totalDuration = duration || 0;
   const progress = totalDuration > 0 ? Math.min(position / totalDuration, 1) : 0;
 
@@ -151,36 +144,93 @@ export default function VoiceNotePlayer({
     <TouchableOpacity
       onPress={togglePlayback}
       activeOpacity={0.85}
-      className="flex-row items-center min-w-[200px]"
+      style={styles.container}
     >
-      <View
-        className={`w-10 h-10 rounded-full items-center justify-center mr-3 ${
-          isOwnMessage ? 'bg-white/20' : 'bg-primary/10'
-        }`}
-      >
+      <View style={[styles.playButton, isOwnMessage ? styles.playButtonOwn : styles.playButtonOther]}>
         {isLoading ? (
           <ActivityIndicator size="small" color={isOwnMessage ? '#fff' : '#0284C7'} />
         ) : (
-          <Text className={isOwnMessage ? 'text-white' : 'text-primary'}>
+          <Text style={isOwnMessage ? styles.playIconOwn : styles.playIconOther}>
             {hasError ? '⚠️' : isPlaying ? '⏸' : '▶️'}
           </Text>
         )}
       </View>
-      <View className="flex-1">
-        <View
-          className={`h-1.5 rounded-full overflow-hidden ${
-            isOwnMessage ? 'bg-white/30' : 'bg-secondary-200'
-          }`}
-        >
+      <View style={styles.progressWrap}>
+        <View style={[styles.progressTrack, isOwnMessage ? styles.trackOwn : styles.trackOther]}>
           <View
-            className={`h-full rounded-full ${isOwnMessage ? 'bg-white' : 'bg-primary'}`}
-            style={{ width: `${Math.max(progress * 100, 4)}%` }}
+            style={[
+              styles.progressFill,
+              isOwnMessage ? styles.fillOwn : styles.fillOther,
+              { width: `${Math.max(progress * 100, 4)}%` },
+            ]}
           />
         </View>
-        <Text className={`text-xs mt-1 ${isOwnMessage ? 'text-primary-100' : 'text-secondary-500'}`}>
+        <Text style={[styles.durationText, isOwnMessage ? styles.durationOwn : styles.durationOther]}>
           {hasError ? 'Tap to retry' : formatDuration(isPlaying ? position : totalDuration)}
         </Text>
       </View>
     </TouchableOpacity>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minWidth: 200,
+  },
+  playButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  playButtonOwn: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+  },
+  playButtonOther: {
+    backgroundColor: 'rgba(2,132,199,0.1)',
+  },
+  playIconOwn: {
+    color: '#FFFFFF',
+  },
+  playIconOther: {
+    color: '#0284C7',
+  },
+  progressWrap: {
+    flex: 1,
+  },
+  progressTrack: {
+    height: 6,
+    borderRadius: 999,
+    overflow: 'hidden',
+  },
+  trackOwn: {
+    backgroundColor: 'rgba(255,255,255,0.3)',
+  },
+  trackOther: {
+    backgroundColor: '#E2E8F0',
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: 999,
+  },
+  fillOwn: {
+    backgroundColor: '#FFFFFF',
+  },
+  fillOther: {
+    backgroundColor: '#0284C7',
+  },
+  durationText: {
+    fontSize: 12,
+    marginTop: 4,
+  },
+  durationOwn: {
+    color: '#E0F2FE',
+  },
+  durationOther: {
+    color: '#64748B',
+  },
+});

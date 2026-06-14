@@ -1,7 +1,7 @@
 import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { View, Text } from 'react-native';
+import { getFocusedRouteNameFromRoute } from '@react-navigation/native';
 
 import { useAuthStore } from '../store/authStore';
 
@@ -27,7 +27,11 @@ import GroupChatScreen from '../screens/chat/GroupChatScreen';
 import InFlightModeScreen from '../screens/chat/InFlightModeScreen';
 import PostLandingMapScreen from '../screens/chat/PostLandingMapScreen';
 import LiveLocationScreen from '../screens/chat/LiveLocationScreen';
-import CallScreen from '../screens/chat/CallScreen';
+
+// Lazy-loaded: avoids pulling call/WebRTC code into the initial bundle in Expo Go.
+function getCallScreen() {
+  return require('../screens/chat/CallScreen').default;
+}
 
 // Profile Screens
 import ProfileScreen from '../screens/profile/ProfileScreen';
@@ -35,15 +39,38 @@ import TrustScoreScreen from '../screens/profile/TrustScoreScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
+const RootStack = createNativeStackNavigator();
 
-// Tab Icon Component
-const TabIcon = ({ name, focused }) => (
-  <View className={`items-center justify-center ${focused ? 'opacity-100' : 'opacity-50'}`}>
-    <Text className={`text-xs mt-1 ${focused ? 'text-primary font-bold' : 'text-secondary-400'}`}>
-      {name}
-    </Text>
-  </View>
-);
+const TAB_BAR_STYLE = {
+  backgroundColor: '#FFFFFF',
+  borderTopWidth: 1,
+  borderTopColor: '#E2E8F0',
+  paddingBottom: 8,
+  paddingTop: 8,
+  height: 65,
+};
+
+const STACK_SCREEN_OPTIONS = {
+  headerShown: false,
+  contentStyle: { flex: 1, backgroundColor: '#F8FAFC' },
+};
+
+const HIDE_TAB_BAR_ROUTES = new Set([
+  'GroupChat',
+  'Call',
+  'LiveLocation',
+  'PostLandingMap',
+  'InFlightMode',
+  'PoolDetails',
+]);
+
+function resolveTabBarStyle(route) {
+  const routeName = getFocusedRouteNameFromRoute(route) ?? '';
+  if (HIDE_TAB_BAR_ROUTES.has(routeName)) {
+    return { display: 'none' };
+  }
+  return TAB_BAR_STYLE;
+}
 
 // Main Tab Navigator (for authenticated users)
 function MainTabs() {
@@ -51,14 +78,7 @@ function MainTabs() {
     <Tab.Navigator
       screenOptions={{
         headerShown: false,
-        tabBarStyle: {
-          backgroundColor: '#FFFFFF',
-          borderTopWidth: 1,
-          borderTopColor: '#E2E8F0',
-          paddingBottom: 8,
-          paddingTop: 8,
-          height: 65,
-        },
+        tabBarStyle: TAB_BAR_STYLE,
         tabBarActiveTintColor: '#0284C7',
         tabBarInactiveTintColor: '#94A3B8',
       }}
@@ -66,16 +86,18 @@ function MainTabs() {
       <Tab.Screen
         name="Home"
         component={HomeStack}
-        options={{
+        options={({ route }) => ({
           tabBarLabel: 'Home',
-        }}
+          tabBarStyle: resolveTabBarStyle(route),
+        })}
       />
       <Tab.Screen
         name="MyPools"
         component={PoolStack}
-        options={{
+        options={({ route }) => ({
           tabBarLabel: 'My Pools',
-        }}
+          tabBarStyle: resolveTabBarStyle(route),
+        })}
       />
       <Tab.Screen
         name="Profile"
@@ -91,7 +113,7 @@ function MainTabs() {
 // Home Stack
 function HomeStack() {
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
+    <Stack.Navigator screenOptions={STACK_SCREEN_OPTIONS}>
       <Stack.Screen name="HomeDashboard" component={HomeDashboard} />
       <Stack.Screen name="CreatePool" component={CreatePoolScreen} />
       <Stack.Screen name="JoinPool" component={JoinPoolScreen} />
@@ -102,8 +124,12 @@ function HomeStack() {
       <Stack.Screen name="LiveLocation" component={LiveLocationScreen} />
       <Stack.Screen
         name="Call"
-        component={CallScreen}
-        options={{ presentation: 'fullScreenModal', animation: 'slide_from_bottom' }}
+        getComponent={getCallScreen}
+        options={{
+          presentation: 'fullScreenModal',
+          animation: 'slide_from_bottom',
+          contentStyle: { flex: 1, backgroundColor: '#0F172A' },
+        }}
       />
     </Stack.Navigator>
   );
@@ -112,7 +138,7 @@ function HomeStack() {
 // Pool Stack
 function PoolStack() {
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
+    <Stack.Navigator screenOptions={STACK_SCREEN_OPTIONS}>
       <Stack.Screen name="JoinPoolList" component={JoinPoolScreen} />
       <Stack.Screen name="PoolDetails" component={PoolDetailsScreen} />
       <Stack.Screen name="GroupChat" component={GroupChatScreen} />
@@ -120,8 +146,12 @@ function PoolStack() {
       <Stack.Screen name="PostLandingMap" component={PostLandingMapScreen} />
       <Stack.Screen
         name="Call"
-        component={CallScreen}
-        options={{ presentation: 'fullScreenModal', animation: 'slide_from_bottom' }}
+        getComponent={getCallScreen}
+        options={{
+          presentation: 'fullScreenModal',
+          animation: 'slide_from_bottom',
+          contentStyle: { flex: 1, backgroundColor: '#0F172A' },
+        }}
       />
     </Stack.Navigator>
   );
@@ -130,7 +160,7 @@ function PoolStack() {
 // Profile Stack
 function ProfileStack() {
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
+    <Stack.Navigator screenOptions={STACK_SCREEN_OPTIONS}>
       <Stack.Screen name="ProfileMain" component={ProfileScreen} />
       <Stack.Screen name="TrustScore" component={TrustScoreScreen} />
       <Stack.Screen name="DocumentHub" component={DocumentHubScreen} />
@@ -143,7 +173,7 @@ function ProfileStack() {
 // Auth Stack
 function AuthStack() {
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
+    <Stack.Navigator screenOptions={STACK_SCREEN_OPTIONS}>
       <Stack.Screen name="Welcome" component={WelcomeScreen} />
       <Stack.Screen name="PhoneInput" component={PhoneInputScreen} />
       <Stack.Screen name="OTPVerify" component={OTPVerifyScreen} />
@@ -154,11 +184,22 @@ function AuthStack() {
 
 // Main App Navigator
 export default function AppNavigator() {
-  const { isAuthenticated, user } = useAuthStore();
+  const { isAuthenticated, isLoading } = useAuthStore();
 
-  if (!isAuthenticated) {
-    return <AuthStack />;
+  if (isLoading) {
+    return null;
   }
 
-  return <MainTabs />;
+  return (
+    <RootStack.Navigator
+      key={isAuthenticated ? 'main-app' : 'auth-app'}
+      screenOptions={STACK_SCREEN_OPTIONS}
+    >
+      {isAuthenticated ? (
+        <RootStack.Screen name="Main" component={MainTabs} />
+      ) : (
+        <RootStack.Screen name="Auth" component={AuthStack} />
+      )}
+    </RootStack.Navigator>
+  );
 }

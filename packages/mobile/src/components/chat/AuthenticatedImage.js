@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, Image, ActivityIndicator } from 'react-native';
-import { fetchAuthenticatedImageDataUri } from '../../utils/chatMedia';
+import { downloadAuthenticatedMediaFile } from '../../utils/chatMedia';
 
 export default function AuthenticatedImage({
   chatRoomId,
@@ -29,9 +29,9 @@ export default function AuthenticatedImage({
       setFailed(false);
 
       try {
-        const dataUri = await fetchAuthenticatedImageDataUri(chatRoomId, objectName, mimeType);
+        const localUri = await downloadAuthenticatedMediaFile(chatRoomId, objectName);
         if (!cancelled) {
-          setUri(dataUri);
+          setUri(localUri);
         }
       } catch {
         if (!cancelled) {

@@ -14,4 +14,11 @@ config.resolver.nodeModulesPaths = [
   path.resolve(workspaceRoot, 'node_modules'),
 ];
 
+// Keep a single copy of navigation + React across the monorepo
+config.resolver.extraNodeModules = {
+  react: path.resolve(workspaceRoot, 'node_modules/react'),
+  '@react-navigation/native': path.resolve(workspaceRoot, 'node_modules/@react-navigation/native'),
+  '@react-navigation/core': path.resolve(workspaceRoot, 'node_modules/@react-navigation/core'),
+};
+
 module.exports = withNativeWind(config, { input: './global.css' });

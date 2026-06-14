@@ -7,7 +7,7 @@ import { getUserId, idsMatch } from '../../utils/user';
 
 export default function PoolDetailsScreen({ navigation, route }) {
   const { poolId } = route.params;
-  const { currentPool, getPoolDetails, joinPool, leavePool, updatePoolStatus, isLoading } = usePoolStore();
+  const { currentPool, getPoolDetails, joinPool, leavePool, removeMemberFromPool, updatePoolStatus, isLoading } = usePoolStore();
   const { user } = useAuthStore();
   const [actionLoading, setActionLoading] = useState(false);
   const insets = useSafeAreaInsets();
@@ -27,7 +27,8 @@ export default function PoolDetailsScreen({ navigation, route }) {
 
   const activeMembers = currentPool.members?.filter((m) => m.status === 'active') || [];
   const isMember = activeMembers.some((m) => idsMatch(getUserId(m.user), userId));
-  const isCreator = idsMatch(currentPool.creator, userId);
+  const isCreator = idsMatch(getUserId(currentPool.creator), userId);
+  const canRemoveMembers = isCreator && ['open', 'full', 'in_progress'].includes(currentPool.status);
   const spotsLeft = currentPool.maxMembers - activeMembers.length;
 
   const handleJoin = async () => {
@@ -97,6 +98,37 @@ export default function PoolDetailsScreen({ navigation, route }) {
     ]);
   };
 
+  const handleRemoveMember = (member) => {
+    const memberId = getUserId(member.user);
+    const memberName = member.user?.name || 'this member';
+
+    Alert.alert(
+      'Remove Member',
+      `Remove ${memberName} from this pool? They will lose access to the group chat.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            setActionLoading(true);
+            try {
+              await removeMemberFromPool(poolId, memberId);
+              Alert.alert('Removed', `${memberName} has been removed from the pool.`);
+            } catch (error) {
+              Alert.alert(
+                'Error',
+                error.response?.data?.error?.message || 'Failed to remove member'
+              );
+            } finally {
+              setActionLoading(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   return (
     <SafeAreaView className="flex-1 bg-secondary-50">
       <ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: insets.bottom + 96 }}>
@@ -161,9 +193,14 @@ export default function PoolDetailsScreen({ navigation, route }) {
         {/* Members */}
         <View className="px-6 mt-6">
           <Text className="text-secondary-900 font-bold text-lg mb-3">Members</Text>
-          {activeMembers.map((member, index) => (
+          {activeMembers.map((member, index) => {
+            const memberId = getUserId(member.user);
+            const memberIsCreator = idsMatch(memberId, getUserId(currentPool.creator));
+            const showRemove = canRemoveMembers && !memberIsCreator;
+
+            return (
             <View
-              key={member.user?._id || index}
+              key={memberId || index}
               className="bg-white rounded-xl p-4 mb-2 flex-row items-center border border-secondary-100"
             >
               <View className="w-10 h-10 bg-primary-100 rounded-full items-center justify-center mr-3">
@@ -184,13 +221,24 @@ export default function PoolDetailsScreen({ navigation, route }) {
                   Trust Score: {member.user?.trustScore || 50}
                 </Text>
               </View>
-              {(idsMatch(member.user, currentPool.creator)) && (
-                <View className="bg-primary-50 px-2 py-1 rounded">
+              {memberIsCreator && (
+                <View className="bg-primary-50 px-2 py-1 rounded mr-2">
                   <Text className="text-primary text-xs font-medium">Creator</Text>
                 </View>
               )}
+              {showRemove && (
+                <TouchableOpacity
+                  onPress={() => handleRemoveMember(member)}
+                  disabled={actionLoading}
+                  className="px-3 py-1.5 rounded-lg border border-danger/30 bg-danger/5"
+                  activeOpacity={0.8}
+                >
+                  <Text className="text-danger text-xs font-semibold">Remove</Text>
+                </TouchableOpacity>
+              )}
             </View>
-          ))}
+            );
+          })}
         </View>
 
         {/* Action Buttons */}

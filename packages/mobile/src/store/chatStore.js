@@ -5,7 +5,7 @@ import { useAuthStore } from './authStore';
 import { getUserId } from '../utils/user';
 import { createLiveSessionId } from '../utils/location';
 import { uploadChatMedia } from '../services/chatMedia.service';
-import { enrichMessageMedia } from '../utils/chatMedia';
+import { enrichMessageMedia, sanitizeOutgoingMetadata } from '../utils/chatMedia';
 
 function dedupeMessagesById(messages) {
   const seen = new Set();
@@ -53,6 +53,14 @@ function normalizeMessageSender(message) {
   };
 }
 
+function sortMessagesByTime(messages) {
+  return [...messages].sort((a, b) => {
+    const aTime = new Date(a.createdAt || 0).getTime();
+    const bTime = new Date(b.createdAt || 0).getTime();
+    return aTime - bTime;
+  });
+}
+
 export const useChatStore = create((set, get) => ({
   messages: [],
   offlineMessages: [],
@@ -70,10 +78,12 @@ export const useChatStore = create((set, get) => ({
 
       if (page === 1) {
         set({
-          messages: dedupeMessagesById(
-            newMessages
-              .map(normalizeMessageSender)
-              .map((message) => enrichMessageMedia(message, chatRoomId))
+          messages: sortMessagesByTime(
+            dedupeMessagesById(
+              newMessages
+                .map(normalizeMessageSender)
+                .map((message) => enrichMessageMedia(message, chatRoomId))
+            )
           ),
         });
       } else {
@@ -116,15 +126,17 @@ export const useChatStore = create((set, get) => ({
     );
 
     // Add to local messages immediately
-    set((state) => ({ messages: [...state.messages, localMessage] }));
+    set((state) => ({
+      messages: sortMessagesByTime(dedupeMessagesById([...state.messages, localMessage])),
+    }));
 
-    // Send via socket
+    // Send via socket (strip client-only fields like localUri)
     const sent = socketService.sendMessage({
       localId,
       chatRoomId,
       content,
       messageType,
-      metadata,
+      metadata: sanitizeOutgoingMetadata(metadata),
     });
 
     if (!sent) {
@@ -154,7 +166,11 @@ export const useChatStore = create((set, get) => ({
   },
 
   // Handle incoming message from socket
-  receiveMessage: (message) => {
+  receiveMessage: (message, activeChatRoomId = null) => {
+    if (activeChatRoomId && message.chatRoomId && message.chatRoomId !== activeChatRoomId) {
+      return;
+    }
+
     const normalizedMessage = enrichMessageMedia(
       normalizeMessageSender(message),
       message.chatRoomId
@@ -181,15 +197,16 @@ export const useChatStore = create((set, get) => ({
         updatedMessages.push(normalizedMessage);
       }
 
-      return { messages: dedupeMessagesById(updatedMessages) };
+      return { messages: sortMessagesByTime(dedupeMessagesById(updatedMessages)) };
     });
   },
 
   // Message sent confirmation
   confirmMessageSent: (localId, messageId, timestamp, sender, serverMessage) => {
     set((state) => ({
-      messages: dedupeMessagesById(
-        state.messages.map((m) => {
+      messages: sortMessagesByTime(
+        dedupeMessagesById(
+          state.messages.map((m) => {
           if (m._id !== localId && m.localId !== localId) return m;
 
           const roomId = serverMessage?.chatRoomId || m.chatRoomId;
@@ -225,6 +242,7 @@ export const useChatStore = create((set, get) => ({
             sender: sender || merged.sender,
           };
         })
+        )
       ),
     }));
   },

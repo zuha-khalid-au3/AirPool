@@ -235,6 +235,68 @@ const leavePool = async (req, res, next) => {
   }
 };
 
+// Remove a member from the pool (creator only)
+const removeMember = async (req, res, next) => {
+  try {
+    const { poolId, userId: targetUserId } = req.params;
+    const pool = await RidePool.findById(poolId);
+
+    if (!pool) {
+      throw new AppError('Pool not found', 404, 'POOL_NOT_FOUND');
+    }
+
+    if (pool.creator.toString() !== req.user._id.toString()) {
+      throw new AppError('Only the pool creator can remove members', 403, 'NOT_CREATOR');
+    }
+
+    if (targetUserId === req.user._id.toString()) {
+      throw new AppError('Use leave pool instead of removing yourself', 400, 'CANNOT_REMOVE_SELF');
+    }
+
+    if (targetUserId === pool.creator.toString()) {
+      throw new AppError('Cannot remove the pool creator', 400, 'CANNOT_REMOVE_CREATOR');
+    }
+
+    const removableStatuses = ['open', 'full', 'in_progress'];
+    if (!removableStatuses.includes(pool.status)) {
+      throw new AppError('Members cannot be removed from this pool in its current state', 400, 'POOL_NOT_REMOVABLE');
+    }
+
+    const targetMember = pool.members.find(
+      (m) => m.user.toString() === targetUserId && m.status === 'active'
+    );
+
+    if (!targetMember) {
+      throw new AppError('Member not found in this pool', 404, 'MEMBER_NOT_FOUND');
+    }
+
+    const removedUser = await User.findById(targetUserId).select('name');
+    pool.removeMember(targetUserId);
+    await pool.save();
+
+    await pool.populate('members.user', 'name avatar trustScore isVerified');
+    await pool.populate('creator', 'name avatar trustScore isVerified');
+
+    await publishToQueue(QUEUES.NOTIFICATIONS, {
+      type: 'member_removed',
+      poolId: pool._id,
+      userId: targetUserId,
+      userName: removedUser?.name,
+      removedBy: req.user._id,
+      removedByName: req.user.name,
+      chatRoomId: pool.chatRoomId,
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Member removed from the pool',
+      data: { pool },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // Update pool status
 const updatePoolStatus = async (req, res, next) => {
   try {
@@ -366,6 +428,7 @@ module.exports = {
   getPoolDetails,
   joinPool,
   leavePool,
+  removeMember,
   updatePoolStatus,
   rateMembers,
   getMyPools,

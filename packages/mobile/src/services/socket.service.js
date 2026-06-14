@@ -3,6 +3,31 @@ import * as SecureStore from 'expo-secure-store';
 import { isNgrokUrl } from '../config/env.utils';
 import { SOCKET_URL } from '../config/env';
 
+const SERVER_EVENTS = [
+  'new_message',
+  'message_sent',
+  'message_error',
+  'user_typing',
+  'user_stopped_typing',
+  'user_joined',
+  'user_left',
+  'member_location',
+  'live_location_update',
+  'live_location_stop',
+  'meeting_point_updated',
+  'call_invite',
+  'call_ringing',
+  'call_accepted',
+  'call_connected',
+  'call_rejected',
+  'call_unavailable',
+  'call_ended',
+  'call_error',
+  'call_webrtc_offer',
+  'call_webrtc_answer',
+  'call_webrtc_ice',
+];
+
 class SocketService {
   constructor() {
     this.socket = null;
@@ -10,6 +35,7 @@ class SocketService {
     this.listeners = new Map();
     this.currentRoomId = null;
     this.connectPromise = null;
+    this.serverEventsBound = false;
   }
 
   waitForConnection(timeoutMs = 10000) {
@@ -34,15 +60,14 @@ class SocketService {
     });
   }
 
-  attachStoredListeners() {
-    if (!this.socket) return;
+  bindServerEvents() {
+    if (!this.socket || this.serverEventsBound) return;
 
-    this.listeners.forEach((callbacks, event) => {
-      callbacks.forEach((callback) => {
-        this.socket.off(event, callback);
-        this.socket.on(event, callback);
-      });
+    SERVER_EVENTS.forEach((event) => {
+      this.socket.on(event, (data) => this._notifyListeners(event, data));
     });
+
+    this.serverEventsBound = true;
   }
 
   joinCurrentRoom() {
@@ -53,6 +78,7 @@ class SocketService {
 
   async connect() {
     if (this.socket?.connected) {
+      this.joinCurrentRoom();
       return true;
     }
 
@@ -80,7 +106,6 @@ class SocketService {
 
       if (this.socket) {
         this.socket.auth = { token: accessToken };
-        this.attachStoredListeners();
         this.socket.connect();
         return this.waitForConnection();
       }
@@ -92,11 +117,19 @@ class SocketService {
       this.socket = io(SOCKET_URL, {
         auth: { token: accessToken },
         extraHeaders,
-        transports: ['websocket', 'polling'],
+        transports: ['polling', 'websocket'],
         reconnection: true,
-        reconnectionAttempts: 10,
+        reconnectionAttempts: Infinity,
         reconnectionDelay: 1000,
-        timeout: 10000,
+        reconnectionDelayMax: 5000,
+        timeout: 20000,
+      });
+
+      this.bindServerEvents();
+
+      this.socket.io.on('reconnect', () => {
+        this.joinCurrentRoom();
+        this._notifyListeners('connection_status', { connected: true, reconnected: true });
       });
 
       this.socket.on('connect', () => {
@@ -117,7 +150,6 @@ class SocketService {
         this._notifyListeners('connection_status', { connected: false, error: error.message });
       });
 
-      this.attachStoredListeners();
       return this.waitForConnection();
     } catch (error) {
       console.error('Socket connection failed:', error);
@@ -131,6 +163,7 @@ class SocketService {
       this.socket = null;
       this.isConnected = false;
       this.currentRoomId = null;
+      this.serverEventsBound = false;
     }
   }
 
@@ -219,6 +252,24 @@ class SocketService {
     }
   }
 
+  sendCallOffer(callId, offer) {
+    if (this.socket?.connected) {
+      this.socket.emit('call_webrtc_offer', { callId, offer });
+    }
+  }
+
+  sendCallAnswer(callId, answer) {
+    if (this.socket?.connected) {
+      this.socket.emit('call_webrtc_answer', { callId, answer });
+    }
+  }
+
+  sendCallIceCandidate(callId, candidate) {
+    if (this.socket?.connected) {
+      this.socket.emit('call_webrtc_ice', { callId, candidate });
+    }
+  }
+
   updateMeetingPoint(chatRoomId, meetingPoint) {
     if (this.socket?.connected) {
       this.socket.emit('update_meeting_point', { chatRoomId, meetingPoint });
@@ -234,33 +285,25 @@ class SocketService {
     if (!callbacks.includes(callback)) {
       callbacks.push(callback);
     }
-
-    if (this.socket) {
-      this.socket.on(event, callback);
-    }
   }
 
   off(event, callback) {
-    if (this.listeners.has(event)) {
-      const callbacks = callback
-        ? this.listeners.get(event).filter((cb) => cb !== callback)
-        : [];
-      this.listeners.set(event, callbacks);
-    }
+    if (!this.listeners.has(event)) return;
 
-    if (this.socket) {
-      if (callback) {
-        this.socket.off(event, callback);
-      } else {
-        this.socket.off(event);
-      }
+    if (callback) {
+      this.listeners.set(
+        event,
+        this.listeners.get(event).filter((cb) => cb !== callback)
+      );
+    } else {
+      this.listeners.set(event, []);
     }
   }
 
   _notifyListeners(event, data) {
-    if (this.listeners.has(event)) {
-      this.listeners.get(event).forEach((cb) => cb(data));
-    }
+    const callbacks = this.listeners.get(event);
+    if (!callbacks?.length) return;
+    callbacks.forEach((cb) => cb(data));
   }
 }
 

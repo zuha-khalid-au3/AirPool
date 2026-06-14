@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, TouchableOpacity } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 
 export default function ScreenHeader({
   title,
@@ -11,26 +11,24 @@ export default function ScreenHeader({
   const isDark = variant === 'dark';
 
   return (
-    <View
-      className={`px-5 py-4 flex-row items-center border-b ${
-        isDark ? 'bg-secondary-900 border-secondary-800' : 'bg-white border-secondary-100'
-      }`}
-    >
+    <View style={[styles.container, isDark ? styles.containerDark : styles.containerLight]}>
       {onBack && (
-        <TouchableOpacity onPress={onBack} className="mr-3 pr-1 py-1" activeOpacity={0.7}>
-          <Text className={`text-lg ${isDark ? 'text-primary-300' : 'text-primary'}`}>←</Text>
+        <TouchableOpacity onPress={onBack} style={styles.backButton} activeOpacity={0.7}>
+          <Text style={[styles.backIcon, isDark ? styles.backIconDark : styles.backIconLight]}>
+            ←
+          </Text>
         </TouchableOpacity>
       )}
-      <View className="flex-1">
+      <View style={styles.titleWrap}>
         <Text
-          className={`font-bold text-lg ${isDark ? 'text-white' : 'text-secondary-900'}`}
+          style={[styles.title, isDark ? styles.titleDark : styles.titleLight]}
           numberOfLines={1}
         >
           {title}
         </Text>
         {subtitle ? (
           <Text
-            className={`text-xs mt-0.5 ${isDark ? 'text-secondary-400' : 'text-secondary-500'}`}
+            style={[styles.subtitle, isDark ? styles.subtitleDark : styles.subtitleLight]}
             numberOfLines={1}
           >
             {subtitle}
@@ -41,3 +39,58 @@ export default function ScreenHeader({
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderBottomWidth: 1,
+  },
+  containerLight: {
+    backgroundColor: '#FFFFFF',
+    borderBottomColor: '#F1F5F9',
+  },
+  containerDark: {
+    backgroundColor: '#0F172A',
+    borderBottomColor: '#1E293B',
+  },
+  backButton: {
+    marginRight: 12,
+    paddingRight: 4,
+    paddingVertical: 4,
+  },
+  backIcon: {
+    fontSize: 18,
+  },
+  backIconLight: {
+    color: '#0284C7',
+  },
+  backIconDark: {
+    color: '#7DD3FC',
+  },
+  titleWrap: {
+    flex: 1,
+  },
+  title: {
+    fontWeight: '700',
+    fontSize: 18,
+  },
+  titleLight: {
+    color: '#0F172A',
+  },
+  titleDark: {
+    color: '#FFFFFF',
+  },
+  subtitle: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  subtitleLight: {
+    color: '#64748B',
+  },
+  subtitleDark: {
+    color: '#94A3B8',
+  },
+});

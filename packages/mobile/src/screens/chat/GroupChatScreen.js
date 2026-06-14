@@ -1,9 +1,10 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, FlatList, KeyboardAvoidingView,
-  Platform, Alert, Modal, Image, ScrollView,
+  Platform, Alert, Modal, Image, StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import { useChatStore } from '../../store/chatStore';
 import { useCallStore } from '../../store/callStore';
 import { useAuthStore } from '../../store/authStore';
@@ -13,7 +14,6 @@ import ScreenHeader from '../../components/ui/ScreenHeader';
 import MessageBubble from '../../components/chat/MessageBubble';
 import ChatComposer from '../../components/chat/ChatComposer';
 import IncomingCallBanner from '../../components/chat/IncomingCallBanner';
-import Avatar from '../../components/ui/Avatar';
 import { getUserId, idsMatch } from '../../utils/user';
 
 export default function GroupChatScreen({ navigation, route }) {
@@ -49,16 +49,50 @@ export default function GroupChatScreen({ navigation, route }) {
     if (poolId) getPoolDetails(poolId);
   }, [poolId]);
 
+  const scrollToLatest = useCallback((animated = true) => {
+    requestAnimationFrame(() => {
+      flatListRef.current?.scrollToEnd({ animated });
+    });
+  }, []);
+
+  useEffect(() => {
+    if (messages.length > 0) {
+      scrollToLatest(false);
+    }
+  }, [messages.length, scrollToLatest]);
+
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+
+      const rejoinRoom = async () => {
+        const connected = await socketService.connect();
+        if (!active || !connected) return;
+        socketService.joinRoom(chatRoomId);
+        await loadMessages(chatRoomId);
+        scrollToLatest(false);
+      };
+
+      rejoinRoom();
+
+      return () => {
+        active = false;
+      };
+    }, [chatRoomId, loadMessages, scrollToLatest])
+  );
+
   useEffect(() => {
     let isActive = true;
 
     const handleNewMessage = (data) => {
-      if (!idsMatch(getUserId(data.message.sender), userId)) {
-        receiveMessage(data.message);
-      }
+      if (data.message?.chatRoomId !== chatRoomId) return;
+      if (idsMatch(getUserId(data.message.sender), userId)) return;
+      receiveMessage(data.message, chatRoomId);
+      scrollToLatest();
     };
 
     const handleMessageSent = (data) => {
+      if (data.message?.chatRoomId && data.message.chatRoomId !== chatRoomId) return;
       confirmMessageSent(
         data.localId,
         data.messageId,
@@ -66,6 +100,7 @@ export default function GroupChatScreen({ navigation, route }) {
         data.sender,
         data.message
       );
+      scrollToLatest();
     };
 
     const handleUserTyping = (data) => setTypingUser(data.userId, data.name);
@@ -86,33 +121,17 @@ export default function GroupChatScreen({ navigation, route }) {
       if (data.chatRoomId === chatRoomId) setIncomingCall(data);
     };
     const handleCallRinging = (data) => {
-      if (data.chatRoomId === chatRoomId) setOutgoingCall(data);
+      if (data.chatRoomId === chatRoomId) {
+        setOutgoingCall({ ...data, chatRoomId });
+      }
     };
     const handleCallAccepted = (data) => {
       if (data.chatRoomId !== chatRoomId) return;
-      const peer = otherMembers.find((m) => idsMatch(getUserId(m.user), data.calleeId));
       setActiveCall(data);
-      navigation.navigate('Call', {
-        callId: data.callId,
-        chatRoomId,
-        peerName: peer?.user?.name || data.callee?.name,
-        peerPhone: peer?.user?.phone,
-        isOutgoing: true,
-        status: 'connected',
-      });
     };
     const handleCallConnected = (data) => {
       if (data.chatRoomId !== chatRoomId) return;
-      const peer = otherMembers.find((m) => idsMatch(getUserId(m.user), data.callerId));
       setActiveCall(data);
-      navigation.navigate('Call', {
-        callId: data.callId,
-        chatRoomId,
-        peerName: peer?.user?.name || data.caller?.name,
-        peerPhone: peer?.user?.phone,
-        isOutgoing: false,
-        status: 'connected',
-      });
     };
     const handleCallRejected = () => {
       clearCall();
@@ -125,7 +144,7 @@ export default function GroupChatScreen({ navigation, route }) {
     const handleCallEnded = () => clearCall();
 
     const setup = async () => {
-      const connected = await socketService.connect();
+      await socketService.connect();
       if (!isActive) return;
 
       socketService.on('new_message', handleNewMessage);
@@ -143,26 +162,35 @@ export default function GroupChatScreen({ navigation, route }) {
       socketService.on('call_unavailable', handleCallUnavailable);
       socketService.on('call_ended', handleCallEnded);
 
-      if (connected) socketService.joinRoom(chatRoomId);
+      socketService.joinRoom(chatRoomId);
       await loadMessages(chatRoomId);
+      scrollToLatest(false);
     };
 
     setup();
 
     return () => {
       isActive = false;
-      [
-        'new_message', 'message_sent', 'user_typing', 'user_stopped_typing',
-        'connection_status', 'live_location_update', 'live_location_stop',
-        'call_invite', 'call_ringing', 'call_accepted', 'call_connected',
-        'call_rejected', 'call_unavailable', 'call_ended',
-      ].forEach((event) => socketService.off(event));
+      socketService.off('new_message', handleNewMessage);
+      socketService.off('message_sent', handleMessageSent);
+      socketService.off('user_typing', handleUserTyping);
+      socketService.off('user_stopped_typing', handleUserStoppedTyping);
+      socketService.off('connection_status', handleConnectionStatus);
+      socketService.off('live_location_update', handleLiveUpdate);
+      socketService.off('live_location_stop', handleLiveStop);
+      socketService.off('call_invite', handleCallInvite);
+      socketService.off('call_ringing', handleCallRinging);
+      socketService.off('call_accepted', handleCallAccepted);
+      socketService.off('call_connected', handleCallConnected);
+      socketService.off('call_rejected', handleCallRejected);
+      socketService.off('call_unavailable', handleCallUnavailable);
+      socketService.off('call_ended', handleCallEnded);
       stopActiveLiveSession();
       clearCall();
       socketService.leaveRoom(chatRoomId);
       clearMessages();
     };
-  }, [chatRoomId, userId]);
+  }, [chatRoomId, userId, scrollToLatest]);
 
   useEffect(() => {
     setSharingLocation(!!activeLiveSession && activeLiveSession.chatRoomId === chatRoomId);
@@ -253,7 +281,7 @@ export default function GroupChatScreen({ navigation, route }) {
       peerName: incomingCall.caller?.name || caller?.user?.name,
       peerPhone: caller?.user?.phone,
       isOutgoing: false,
-      status: 'connected',
+      status: 'connecting',
     });
   };
 
@@ -300,7 +328,7 @@ export default function GroupChatScreen({ navigation, route }) {
       : `${otherMembers.length + 1} members in chat`;
 
   return (
-    <SafeAreaView className="flex-1 bg-secondary-50" edges={['top']}>
+    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <IncomingCallBanner
         call={incomingCall}
         onAccept={acceptIncomingCall}
@@ -312,16 +340,16 @@ export default function GroupChatScreen({ navigation, route }) {
         subtitle={subtitle}
         onBack={() => navigation.goBack()}
         rightAction={
-          <View className="flex-row items-center gap-2">
+          <View style={styles.headerActions}>
             <TouchableOpacity
-              className="w-10 h-10 rounded-full bg-success/10 items-center justify-center"
+              style={styles.headerActionBtn}
               onPress={startVoiceCall}
               activeOpacity={0.8}
             >
               <Text>📞</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              className="w-10 h-10 rounded-full bg-primary/10 items-center justify-center"
+              style={[styles.headerActionBtn, styles.headerActionBtnPrimary]}
               onPress={() => navigation.navigate('PostLandingMap', { chatRoomId, poolId })}
               activeOpacity={0.8}
             >
@@ -331,72 +359,63 @@ export default function GroupChatScreen({ navigation, route }) {
         }
       />
 
-      {otherMembers.length > 0 && (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          className="bg-white border-b border-secondary-100 px-4 py-3"
+      <View style={styles.chatBody}>
+        <KeyboardAvoidingView
+          style={styles.flex}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
         >
-          {otherMembers.map((m) => (
-            <View key={getUserId(m.user)} className="items-center mr-4">
-              <Avatar name={m.user?.name} size={44} />
-              <Text className="text-secondary-500 text-[11px] mt-1 max-w-[56px]" numberOfLines={1}>
-                {m.user?.name?.split(' ')[0]}
-              </Text>
-            </View>
-          ))}
-        </ScrollView>
-      )}
+          <FlatList
+            ref={flatListRef}
+            data={messages}
+            renderItem={renderMessage}
+            keyExtractor={(item, index) => {
+              const id = item._id || item.localId;
+              return id ? String(id) : `message-${index}`;
+            }}
+            style={styles.messageList}
+            contentContainerStyle={[
+              styles.messageListContent,
+              messages.length === 0 && styles.messageListContentEmpty,
+            ]}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="interactive"
+            onContentSizeChange={() => scrollToLatest(false)}
+            ListEmptyComponent={
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyEmoji}>💬</Text>
+                <Text style={styles.emptyTitle}>Start the conversation</Text>
+                <Text style={styles.emptySubtitle}>
+                  Share text, photos, voice notes, live location, or start a voice call.
+                </Text>
+              </View>
+            }
+          />
 
-      <KeyboardAvoidingView
-        className="flex-1"
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={90}
-      >
-        <FlatList
-          ref={flatListRef}
-          data={messages}
-          renderItem={renderMessage}
-          keyExtractor={(item, index) => {
-            const id = item._id || item.localId;
-            return id ? String(id) : `message-${index}`;
-          }}
-          contentContainerStyle={{ padding: 16, paddingBottom: 8, flexGrow: 1 }}
-          onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
-          ListEmptyComponent={
-            <View className="flex-1 items-center justify-center py-20">
-              <Text className="text-5xl mb-4">💬</Text>
-              <Text className="text-secondary-700 font-semibold text-lg">Start the conversation</Text>
-              <Text className="text-secondary-400 text-center mt-2 px-8">
-                Share text, photos, voice notes, live location, or start a voice call.
-              </Text>
-            </View>
-          }
-        />
-
-        <ChatComposer
-          inputText={inputText}
-          onChangeText={handleTyping}
-          onSend={handleSend}
-          onShareLocation={handleShareLocation}
-          onSendMedia={handleSendMedia}
-          sharingLocation={sharingLocation}
-          sendingMedia={sendingMedia}
-        />
-      </KeyboardAvoidingView>
+          <ChatComposer
+            inputText={inputText}
+            onChangeText={handleTyping}
+            onSend={handleSend}
+            onShareLocation={handleShareLocation}
+            onSendMedia={handleSendMedia}
+            sharingLocation={sharingLocation}
+            sendingMedia={sendingMedia}
+          />
+        </KeyboardAvoidingView>
+      </View>
 
       <Modal visible={!!previewImage} transparent animationType="fade">
-        <View className="flex-1 bg-black/95 justify-center">
+        <View style={styles.previewBackdrop}>
           <TouchableOpacity
-            className="absolute top-14 right-6 z-10 bg-white/20 px-4 py-2 rounded-full"
+            style={styles.previewClose}
             onPress={() => setPreviewImage(null)}
           >
-            <Text className="text-white font-medium">Close</Text>
+            <Text style={styles.previewCloseText}>Close</Text>
           </TouchableOpacity>
           {previewImage && (
             <Image
               source={{ uri: previewImage }}
-              style={{ width: '100%', height: '70%' }}
+              style={styles.previewImage}
               resizeMode="contain"
             />
           )}
@@ -405,3 +424,87 @@ export default function GroupChatScreen({ navigation, route }) {
     </SafeAreaView>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#F8FAFC',
+  },
+  flex: {
+    flex: 1,
+  },
+  chatBody: {
+    flex: 1,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  headerActionBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(16,185,129,0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerActionBtnPrimary: {
+    backgroundColor: 'rgba(2,132,199,0.1)',
+  },
+  messageList: {
+    flex: 1,
+  },
+  messageListContent: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 8,
+  },
+  messageListContentEmpty: {
+    flexGrow: 1,
+    justifyContent: 'center',
+  },
+  emptyState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 48,
+    paddingHorizontal: 32,
+  },
+  emptyEmoji: {
+    fontSize: 48,
+    marginBottom: 16,
+  },
+  emptyTitle: {
+    color: '#334155',
+    fontWeight: '600',
+    fontSize: 18,
+  },
+  emptySubtitle: {
+    color: '#94A3B8',
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  previewBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.95)',
+    justifyContent: 'center',
+  },
+  previewClose: {
+    position: 'absolute',
+    top: 56,
+    right: 24,
+    zIndex: 10,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 999,
+  },
+  previewCloseText: {
+    color: '#FFFFFF',
+    fontWeight: '500',
+  },
+  previewImage: {
+    width: '100%',
+    height: '70%',
+  },
+});

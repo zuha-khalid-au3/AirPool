@@ -101,6 +101,20 @@ export const usePoolStore = create((set, get) => ({
     }
   },
 
+  removeMemberFromPool: async (poolId, userId) => {
+    try {
+      const response = await api.post(`/pools/${poolId}/members/${userId}/remove`);
+      const updatedPool = response.data.data.pool;
+      set((state) => ({
+        currentPool: updatedPool,
+        myPools: state.myPools.map((pool) => (pool._id === poolId ? updatedPool : pool)),
+      }));
+      return updatedPool;
+    } catch (error) {
+      throw error;
+    }
+  },
+
   // Update pool status
   updatePoolStatus: async (poolId, status) => {
     try {
