@@ -46,6 +46,9 @@ export default function GroupChatScreen({ navigation, route }) {
   const messages = useChatStore(
     (state) => state.messagesByRoom[chatRoomId] ?? EMPTY_MESSAGES
   );
+  const messagesRevision = useChatStore(
+    (state) => state.messagesRevisionByRoom?.[chatRoomId] || 0
+  );
   const onlineUserIds = useChatStore(
     (state) => state.onlineUsersByRoom[chatRoomId] ?? EMPTY_ONLINE
   );
@@ -74,7 +77,14 @@ export default function GroupChatScreen({ navigation, route }) {
   const prevMessageCountRef = useRef(0);
   const pendingScrollRef = useRef(false);
 
-  const displayMessages = useMemo(() => [...messages].reverse(), [messages]);
+  const displayMessages = useMemo(
+    () => [...messages].reverse(),
+    [messages, messagesRevision]
+  );
+
+  const lastMessageKey = displayMessages[0]
+    ? String(displayMessages[0]._id || displayMessages[0].localId || '')
+    : 'empty';
 
   const otherMembers =
     currentPool?.members?.filter(
@@ -121,6 +131,14 @@ export default function GroupChatScreen({ navigation, route }) {
       pendingScrollRef.current = true;
       prevMessageCountRef.current = 0;
 
+      const handleReconnect = (data) => {
+        if (active && data?.connected) {
+          socketService.joinRoom(chatRoomId);
+        }
+      };
+
+      socketService.on('connection_status', handleReconnect);
+
       socketService.joinRoom(chatRoomId);
       socketService.connect().catch(() => {});
 
@@ -130,6 +148,7 @@ export default function GroupChatScreen({ navigation, route }) {
 
       return () => {
         active = false;
+        socketService.off('connection_status', handleReconnect);
         socketService.leaveRoom(chatRoomId);
         clearRoomState(chatRoomId);
       };
@@ -444,7 +463,7 @@ export default function GroupChatScreen({ navigation, route }) {
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="interactive"
           ListHeaderComponent={renderTypingBar}
-          extraData={`${displayMessages.length}-${typingUsers.length}-${typingLabel || ''}`}
+          extraData={`${messagesRevision}-${lastMessageKey}-${typingUsers.length}`}
           onLayout={() => {
             if (pendingScrollRef.current && displayMessages.length > 0) {
               scrollToLatest(false);
