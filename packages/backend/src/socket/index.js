@@ -137,10 +137,48 @@ const setupSocketHandlers = (io, redisClient) => {
       });
     });
 
-    // Live location sharing
+    // Live location sharing (session-based, tied to chat location messages)
+    socket.on('live_location_update', (data) => {
+      const {
+        chatRoomId,
+        liveSessionId,
+        latitude,
+        longitude,
+        heading,
+        accuracy,
+      } = data;
+
+      if (!chatRoomId || !liveSessionId) return;
+
+      io.to(chatRoomId).emit('live_location_update', {
+        liveSessionId,
+        userId: socket.userId,
+        name: socket.user.name,
+        avatar: socket.user.avatar,
+        latitude,
+        longitude,
+        heading,
+        accuracy,
+        timestamp: new Date(),
+      });
+    });
+
+    socket.on('live_location_stop', (data) => {
+      const { chatRoomId, liveSessionId } = data;
+      if (!chatRoomId || !liveSessionId) return;
+
+      io.to(chatRoomId).emit('live_location_stop', {
+        liveSessionId,
+        userId: socket.userId,
+        name: socket.user.name,
+        timestamp: new Date(),
+      });
+    });
+
+    // Legacy location broadcast (kept for PostLandingMap screen)
     socket.on('share_location', (data) => {
       const { chatRoomId, latitude, longitude } = data;
-      socket.to(chatRoomId).emit('member_location', {
+      io.to(chatRoomId).emit('member_location', {
         userId: socket.userId,
         name: socket.user.name,
         avatar: socket.user.avatar,

@@ -26,6 +26,10 @@ const messageSchema = new mongoose.Schema(
       // For location messages
       latitude: Number,
       longitude: Number,
+      heading: Number,
+      accuracy: Number,
+      liveSessionId: String,
+      isLive: Boolean,
       // For image messages
       imageUrl: String,
       // For system messages

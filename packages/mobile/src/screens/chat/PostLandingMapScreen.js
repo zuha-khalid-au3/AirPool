@@ -1,34 +1,53 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, Alert, Dimensions } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { View, Text, TouchableOpacity, Alert, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import MapView, { Marker, PROVIDER_DEFAULT } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { useChatStore } from '../../store/chatStore';
+import { useAuthStore } from '../../store/authStore';
 import { socketService } from '../../services/socket.service';
-
-const { width } = Dimensions.get('window');
+import { getUserId } from '../../utils/user';
 
 export default function PostLandingMapScreen({ navigation, route }) {
-  const { chatRoomId, poolId } = route.params || {};
-  const { memberLocations, updateMemberLocation } = useChatStore();
+  const { chatRoomId } = route.params || {};
+  const { user } = useAuthStore();
+  const userId = getUserId(user);
+  const {
+    memberLocations,
+    liveLocations,
+    updateMemberLocation,
+    updateLiveLocation,
+    shareLiveLocation,
+    stopActiveLiveSession,
+    activeLiveSession,
+  } = useChatStore();
+
+  const mapRef = useRef(null);
   const [myLocation, setMyLocation] = useState(null);
   const [isSharing, setIsSharing] = useState(false);
-  const [locationWatcher, setLocationWatcher] = useState(null);
 
   useEffect(() => {
-    requestLocationPermission();
-
-    // Listen for member locations
-    socketService.on('member_location', (data) => {
+    const handleMemberLocation = (data) => {
       updateMemberLocation(data.userId, data);
-    });
+    };
+
+    const handleLiveUpdate = (data) => {
+      updateLiveLocation(data.liveSessionId, data);
+    };
+
+    requestLocationPermission();
+    socketService.on('member_location', handleMemberLocation);
+    socketService.on('live_location_update', handleLiveUpdate);
 
     return () => {
-      socketService.off('member_location');
-      if (locationWatcher) {
-        locationWatcher.remove();
-      }
+      socketService.off('member_location', handleMemberLocation);
+      socketService.off('live_location_update', handleLiveUpdate);
     };
   }, []);
+
+  useEffect(() => {
+    setIsSharing(!!activeLiveSession && activeLiveSession.chatRoomId === chatRoomId);
+  }, [activeLiveSession, chatRoomId]);
 
   const requestLocationPermission = async () => {
     const { status } = await Location.requestForegroundPermissionsAsync();
@@ -47,38 +66,52 @@ export default function PostLandingMapScreen({ navigation, route }) {
     });
   };
 
-  const startSharingLocation = async () => {
-    setIsSharing(true);
+  const toggleSharing = async () => {
+    if (isSharing) {
+      stopActiveLiveSession();
+      setIsSharing(false);
+      return;
+    }
 
-    const watcher = await Location.watchPositionAsync(
-      {
-        accuracy: Location.Accuracy.High,
-        distanceInterval: 10, // Update every 10 meters
-        timeInterval: 5000, // Or every 5 seconds
-      },
-      (location) => {
-        const { latitude, longitude } = location.coords;
-        setMyLocation({ latitude, longitude });
-        socketService.shareLocation(chatRoomId, latitude, longitude);
-      }
-    );
-
-    setLocationWatcher(watcher);
-  };
-
-  const stopSharingLocation = () => {
-    setIsSharing(false);
-    if (locationWatcher) {
-      locationWatcher.remove();
-      setLocationWatcher(null);
+    try {
+      await shareLiveLocation(chatRoomId);
+      setIsSharing(true);
+    } catch (error) {
+      Alert.alert('Could not share location', error.message);
     }
   };
 
-  const memberLocationsList = Object.entries(memberLocations);
+  const liveMarkers = Object.values(liveLocations).filter(
+    (loc) => loc.chatRoomId === chatRoomId && loc.latitude != null
+  );
+  const memberMarkers = Object.entries(memberLocations).map(([id, data]) => ({
+    id,
+    ...data,
+  }));
+
+  const allMarkers = [
+    ...liveMarkers.map((loc) => ({
+      id: loc.liveSessionId || loc.userId,
+      name: loc.name,
+      latitude: loc.latitude,
+      longitude: loc.longitude,
+      isLive: loc.isLive !== false,
+    })),
+    ...memberMarkers.map((m) => ({
+      id: m.userId,
+      name: m.name,
+      latitude: m.latitude,
+      longitude: m.longitude,
+      isLive: false,
+    })),
+  ];
+
+  const uniqueMarkers = allMarkers.filter(
+    (marker, index, arr) => arr.findIndex((m) => m.id === marker.id) === index
+  );
 
   return (
     <SafeAreaView className="flex-1 bg-secondary-50">
-      {/* Header */}
       <View className="bg-white px-6 py-4 border-b border-secondary-100 flex-row items-center">
         <TouchableOpacity onPress={() => navigation.goBack()} className="mr-4">
           <Text className="text-primary text-lg">← Back</Text>
@@ -86,63 +119,64 @@ export default function PostLandingMapScreen({ navigation, route }) {
         <View className="flex-1">
           <Text className="text-secondary-900 font-bold text-lg">Live Locations</Text>
           <Text className="text-secondary-500 text-xs">
-            {memberLocationsList.length} members sharing location
+            {uniqueMarkers.length} member{uniqueMarkers.length === 1 ? '' : 's'} on map
           </Text>
         </View>
       </View>
 
-      {/* Map Placeholder - In production, use react-native-maps */}
-      <View className="flex-1 bg-secondary-100 items-center justify-center">
-        <View className="bg-white rounded-2xl p-8 mx-6 items-center shadow-lg">
-          <Text className="text-5xl mb-4">🗺️</Text>
-          <Text className="text-secondary-900 font-bold text-lg text-center">
-            Live Map View
-          </Text>
-          <Text className="text-secondary-500 text-center mt-2 leading-5">
-            In the full build, this shows a real-time map with all pool members' locations,
-            the meeting point, and navigation directions.
-          </Text>
-
-          {myLocation && (
-            <View className="bg-primary-50 rounded-xl p-4 mt-4 w-full">
-              <Text className="text-primary-700 text-sm font-medium">Your Location:</Text>
-              <Text className="text-primary-600 text-xs mt-1">
-                {myLocation.latitude.toFixed(6)}, {myLocation.longitude.toFixed(6)}
-              </Text>
-            </View>
-          )}
-        </View>
+      <View className="flex-1">
+        <MapView
+          ref={mapRef}
+          style={{ flex: 1 }}
+          provider={PROVIDER_DEFAULT}
+          showsUserLocation
+          showsMyLocationButton={Platform.OS === 'android'}
+          initialRegion={{
+            latitude: myLocation?.latitude || 28.5562,
+            longitude: myLocation?.longitude || 77.1,
+            latitudeDelta: 0.05,
+            longitudeDelta: 0.05,
+          }}
+        >
+          {uniqueMarkers.map((marker) => (
+            <Marker
+              key={String(marker.id)}
+              coordinate={{
+                latitude: marker.latitude,
+                longitude: marker.longitude,
+              }}
+              title={marker.name}
+              description={marker.isLive ? 'Live location' : 'Last known location'}
+              pinColor={marker.id === userId ? '#10B981' : '#0284C7'}
+            />
+          ))}
+        </MapView>
       </View>
 
-      {/* Members Sharing */}
-      {memberLocationsList.length > 0 && (
-        <View className="bg-white px-6 py-4 border-t border-secondary-100">
-          <Text className="text-secondary-700 font-medium mb-2">Members Nearby:</Text>
-          {memberLocationsList.map(([userId, data]) => (
-            <View key={userId} className="flex-row items-center py-2">
-              <View className="w-8 h-8 bg-success/10 rounded-full items-center justify-center mr-3">
-                <Text className="text-success">📍</Text>
-              </View>
-              <Text className="text-secondary-700">{data.name}</Text>
-              <Text className="text-secondary-400 text-xs ml-auto">
-                {new Date(data.timestamp).toLocaleTimeString()}
+      {uniqueMarkers.length > 0 && (
+        <View className="bg-white px-6 py-3 border-t border-secondary-100 max-h-36">
+          {uniqueMarkers.slice(0, 4).map((marker) => (
+            <View key={String(marker.id)} className="flex-row items-center py-1.5">
+              <Text className="text-success mr-2">{marker.isLive ? '🟢' : '📍'}</Text>
+              <Text className="text-secondary-700 flex-1">{marker.name}</Text>
+              <Text className="text-secondary-400 text-xs">
+                {marker.isLive ? 'Live' : 'Recent'}
               </Text>
             </View>
           ))}
         </View>
       )}
 
-      {/* Share Location Button */}
       <View className="bg-white px-6 py-4 border-t border-secondary-100">
         <TouchableOpacity
           className={`w-full py-4 rounded-xl items-center ${
             isSharing ? 'bg-danger' : 'bg-success'
           }`}
-          onPress={isSharing ? stopSharingLocation : startSharingLocation}
+          onPress={toggleSharing}
           activeOpacity={0.8}
         >
           <Text className="text-white text-lg font-semibold">
-            {isSharing ? '⏹ Stop Sharing Location' : '📍 Share My Location'}
+            {isSharing ? '⏹ Stop sharing live location' : '📍 Share my live location in chat'}
           </Text>
         </TouchableOpacity>
       </View>

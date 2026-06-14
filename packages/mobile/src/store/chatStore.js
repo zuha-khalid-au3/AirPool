@@ -3,6 +3,7 @@ import api from '../services/api';
 import { socketService } from '../services/socket.service';
 import { useAuthStore } from './authStore';
 import { getUserId } from '../utils/user';
+import { createLiveSessionId } from '../utils/location';
 
 function dedupeMessagesById(messages) {
   const seen = new Set();
@@ -56,6 +57,8 @@ export const useChatStore = create((set, get) => ({
   isConnected: false,
   typingUsers: [],
   memberLocations: {},
+  liveLocations: {},
+  activeLiveSession: null,
 
   // Load messages for a chat room
   loadMessages: async (chatRoomId, page = 1) => {
@@ -210,9 +213,136 @@ export const useChatStore = create((set, get) => ({
     }));
   },
 
+  updateLiveLocation: (liveSessionId, locationData) => {
+    set((state) => ({
+      liveLocations: {
+        ...state.liveLocations,
+        [liveSessionId]: {
+          ...state.liveLocations[liveSessionId],
+          ...locationData,
+          isLive: true,
+        },
+      },
+    }));
+  },
+
+  markLiveLocationStopped: (liveSessionId) => {
+    set((state) => {
+      if (!state.liveLocations[liveSessionId]) return state;
+      return {
+        liveLocations: {
+          ...state.liveLocations,
+          [liveSessionId]: {
+            ...state.liveLocations[liveSessionId],
+            isLive: false,
+            stoppedAt: new Date().toISOString(),
+          },
+        },
+      };
+    });
+  },
+
+  shareLiveLocation: async (chatRoomId) => {
+    const Location = await import('expo-location');
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status !== 'granted') {
+      throw new Error('Location permission is required to share live location.');
+    }
+
+    const user = useAuthStore.getState().user;
+    const userId = getUserId(user);
+    const liveSessionId = createLiveSessionId(userId);
+
+    const position = await Location.getCurrentPositionAsync({
+      accuracy: Location.Accuracy.High,
+    });
+    const { latitude, longitude, heading, accuracy } = position.coords;
+
+    const metadata = {
+      latitude,
+      longitude,
+      heading,
+      accuracy,
+      liveSessionId,
+      isLive: true,
+    };
+
+    get().sendMessage(
+      chatRoomId,
+      '📍 Sharing live location — tap to track and navigate',
+      'location',
+      metadata
+    );
+
+    get().updateLiveLocation(liveSessionId, {
+      userId,
+      name: user?.name,
+      latitude,
+      longitude,
+      heading,
+      accuracy,
+      chatRoomId,
+    });
+
+    const watcher = await Location.watchPositionAsync(
+      {
+        accuracy: Location.Accuracy.High,
+        distanceInterval: 8,
+        timeInterval: 4000,
+      },
+      (loc) => {
+        const coords = loc.coords;
+        get().updateLiveLocation(liveSessionId, {
+          userId,
+          name: user?.name,
+          latitude: coords.latitude,
+          longitude: coords.longitude,
+          heading: coords.heading,
+          accuracy: coords.accuracy,
+          chatRoomId,
+          timestamp: new Date().toISOString(),
+        });
+        socketService.sendLiveLocationUpdate(
+          chatRoomId,
+          liveSessionId,
+          coords.latitude,
+          coords.longitude,
+          coords.heading,
+          coords.accuracy
+        );
+      }
+    );
+
+    set({
+      activeLiveSession: { liveSessionId, chatRoomId, watcher },
+    });
+
+    return liveSessionId;
+  },
+
+  stopActiveLiveSession: () => {
+    const { activeLiveSession } = get();
+    if (!activeLiveSession) return;
+
+    const { liveSessionId, chatRoomId, watcher } = activeLiveSession;
+    if (watcher?.remove) {
+      watcher.remove();
+    }
+
+    socketService.stopLiveLocation(chatRoomId, liveSessionId);
+    get().markLiveLocationStopped(liveSessionId);
+    set({ activeLiveSession: null });
+  },
+
   // Connection status
   setConnected: (status) => set({ isConnected: status }),
 
   // Clear messages
-  clearMessages: () => set({ messages: [], typingUsers: [], memberLocations: {} }),
+  clearMessages: () =>
+    set({
+      messages: [],
+      typingUsers: [],
+      memberLocations: {},
+      liveLocations: {},
+    }),
 }));

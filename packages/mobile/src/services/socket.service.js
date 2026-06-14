@@ -176,6 +176,25 @@ class SocketService {
     }
   }
 
+  sendLiveLocationUpdate(chatRoomId, liveSessionId, latitude, longitude, heading, accuracy) {
+    if (this.socket?.connected) {
+      this.socket.emit('live_location_update', {
+        chatRoomId,
+        liveSessionId,
+        latitude,
+        longitude,
+        heading,
+        accuracy,
+      });
+    }
+  }
+
+  stopLiveLocation(chatRoomId, liveSessionId) {
+    if (this.socket?.connected) {
+      this.socket.emit('live_location_stop', { chatRoomId, liveSessionId });
+    }
+  }
+
   updateMeetingPoint(chatRoomId, meetingPoint) {
     if (this.socket?.connected) {
       this.socket.emit('update_meeting_point', { chatRoomId, meetingPoint });
